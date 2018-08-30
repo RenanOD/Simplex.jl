@@ -82,14 +82,9 @@ function test_transplu()
         Δz = dot(c, x) - zj
         # @test x ≈ xj
         @test dot(c, x) ≈ zj atol = 1e-3
-        if abs(dot(c, x) - zj) > 1e-3
-          println("zcalc: $(dot(c, x)); zcerto: $zj")
-          println("x*: $x")
-        end
         @test status == :Optimal
       end
     end
   end
 end
 test_transplu()
-

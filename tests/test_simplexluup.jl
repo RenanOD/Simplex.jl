@@ -2,7 +2,6 @@ using Simplex, Base.Test, JuMP, Cbc
 include("generators/transport_problem.jl")
 
 function test_simplexluup()
-
   #examples 3.1 and 3.2 (luenberger)
   @testset "Luenberger examples" begin
     c = [4; 1; 1]

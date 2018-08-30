@@ -1,13 +1,14 @@
 export simplexluup
 
-function simplexluup(c, A, b, IB=0, xB=0, L=0, U=0, MP=[], P=[], prow=0, Rs=0; max_iter = 4000) #no need to pass xB
+function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 4000)
   m, n = size(A)
-  A = sparse(A)*1.0 #only needed if IB == 0
   iter = 0
+  P, MP = [], []
+  updates = 0
   if IB == 0 # construct artificial problem
     artificial = true
     signb = sign.(b)
-    A = [A spdiagm(signb)]
+    A = [sparse(A) spdiagm(signb)]*1.0
     IB = collect(n+1:n+m) # indexes of basic variables
     IN = collect(1:n)
     co = collect(c)
@@ -18,21 +19,15 @@ function simplexluup(c, A, b, IB=0, xB=0, L=0, U=0, MP=[], P=[], prow=0, Rs=0; m
   else
     artificial = false
     IN = setdiff(1:n, IB)
-    if (MP == [] && L == 0) #only if user gives IB
+    if L == 0 # if user gives IB
+      A = sparse(A)*1.0
       F = lufact(A[:,IB])
       xB = F\b
       L, U, prow, pcol, Rs = F[:(:)] # (Rs.*A)[prow,pcol] * x[pcol] = b[prow]
       IB, xB = IB[pcol], xB[pcol]
-      r = c[IN] - A[:,IN]'*((speye(m)[:,prow]*(L'\(U'\(c[IB])))).*Rs)
-    elseif MP==[] #there is L, no MP
-      r = c[IN] - A[:,IN]'*((speye(m)[:,prow]*(L'\(U'\(c[IB])))).*Rs)
-    else #there is MP, maybe L
-      lambda = U'\((c[IB]))
-      for j in 1:length(MP)
-        lambda -= lambda[end]*MP[end-j+1]
-        lambda[P[end-j+1]] = lambda
-      end
-      r = (L==0)? c[IN] - A[:,IN]'*lambda : c[IN] - A[:,IN]'*((speye(m)[:,prow]*(L'\lambda)).*Rs)
+      r = c[IN] - A[:,IN]'*((speye(m)[:,prow]*(L'\(U'\c[IB]))).*Rs)
+    else
+      r = c[IN] - A[:,IN]'*((speye(m)[:,prow]*(L'\(U'\c[IB]))).*Rs)
     end
   end
   q = findfirst(r .< -1e-12) # Bland's Rule
@@ -43,9 +38,9 @@ function simplexluup(c, A, b, IB=0, xB=0, L=0, U=0, MP=[], P=[], prow=0, Rs=0; m
     iter += 1
     @assert all(xB .>= 0)
     w = (L==0)? A[:,IN[q]] : L\((A[:,IN[q]].*Rs)[prow])
-    for j in 1:length(MP)
+    for j in 1:updates
       w = w[P[j]]
-      w[end] -= dot(MP[j], w)
+      w[end] -= dot(MP[j], w[m-length(MP[j]):m-1])
     end
     d = (U\w)
     apfrac = xB ./ d # relative variable changes to direction
@@ -62,28 +57,29 @@ function simplexluup(c, A, b, IB=0, xB=0, L=0, U=0, MP=[], P=[], prow=0, Rs=0; m
     p = findfirst(apfrac, xq) # Bland's Rule
     xB -= xq * d; xB[p] = xq # update solution
     IB[p], IN[q] = IN[q], IB[p] # update indexes
-    if length(MP) >= 25 #reset LU
+    if updates >= 0 # reset LU
       F = lufact(A[:,IB])
       L, U, prow, pcol, Rs = F[:(:)] # (Rs.*A)[prow,pcol] * x[pcol] = b[prow]
       IB, xB = IB[pcol], xB[pcol]
       MP, P = [], []
-    else #update LU
+      updates = 0
+    else # update LU
       U[:,p] = w
       push!(P, reverse(reverse(1:m,p,m),p,m-1))
       U = U[:,P[end]]
-      mp = spzeros(m)
+      push!(MP, spzeros(m-p))
       for i in 1:m-p
-        mp[p+i-1] = U[p,p+i-1]/U[p+i,p+i-1]
-        U[p,i:m] -= mp[p+i-1]*U[p+i,i:m]
+        (MP[end])[i] = U[p,p+i-1]/U[p+i,p+i-1]
+        U[p,i:m] -= (MP[end])[i]*U[p+i,i:m]
       end
-      push!(MP, mp)
       U = U[P[end],:]
       IB, xB = IB[P[end]], xB[P[end]]
+      updates += 1
     end
 
-    lambda = U'\((c[IB]))
-    for j in 1:length(MP)
-      lambda -= lambda[end]*MP[end-j+1]
+    lambda = U'\c[IB]
+    for j in 1:updates
+      lambda[m-length(MP[end-j+1]):m-1] -= lambda[end]*MP[end-j+1]
       lambda[P[end-j+1]] = lambda
     end
     if L == 0
@@ -103,7 +99,7 @@ function simplexluup(c, A, b, IB=0, xB=0, L=0, U=0, MP=[], P=[], prow=0, Rs=0; m
     x[IB] = xB
     z = dot(c, x)
   else
-    if dot(xB, c[IB])/norm(xB) > 1e-12 #use eps, not zero
+    if dot(xB, c[IB])/norm(xB) > 1e-12
       status = :Infeasible
       I = find(IB .<= n - m)
       x[I] = xB[I]
@@ -112,19 +108,18 @@ function simplexluup(c, A, b, IB=0, xB=0, L=0, U=0, MP=[], P=[], prow=0, Rs=0; m
       deleteat!(IN, find(IN .> n))
       Irows = collect(1:m)
       p = findfirst(IB .> n)
+      if updates!=0
+        F = lufact(A[Irows,IB])
+        L, U, prow, pcol, Rs = F[:(:)]
+        IB, xB = IB[pcol], xB[pcol]
+        MP, P = [], []
+      end
       while p != 0
         q = 1
         Ap = (prow==0)? A[Irows,IB[p]] : A[Irows,IB[p]][prow]
-        for pj in P
-          Ap = Ap[pj]
-        end
         PivotAp = findfirst(Ap .> 0)
         while q <= length(IN) #searching for columns to substitute artificials in basis
           w = (L==0)? A[Irows,IN[q]] : L\((A[Irows,IN[q]].*Rs)[prow])
-          for j in 1:length(MP)
-            w = w[P[j]]
-            w[end] -= dot(MP[j], w)
-          end
           if abs((U\w)[PivotAp]) > 1e-12
             break
           end
@@ -137,29 +132,17 @@ function simplexluup(c, A, b, IB=0, xB=0, L=0, U=0, MP=[], P=[], prow=0, Rs=0; m
           F = lufact(A[Irows,IB])
           L, U, prow, pcol, Rs = F[:(:)]
           IB, xB = IB[pcol], xB[pcol]
-          MP, P = [], []
         else
-          IB[p] = IN[q]
-          deleteat!(IN, q)
-          #update LU
-          U[:,p] = w
-          push!(P, reverse(reverse(1:m,p,m),p,m-1))
-          U = U[:,P[end]]
-          mp = spzeros(m)
-          for i in 1:m-p
-            mp[p+i-1] = U[p,p+i-1]/U[p+i,p+i-1]
-            U[p,:] -= mp[p+i-1]*U[p+i,:]
-          end
-          push!(MP, mp)
-          U = U[P[end],:]
-          IB, xB = IB[P[end]], xB[P[end]]
+          F = lufact(A[Irows,IB])
+          L, U, prow, pcol, Rs = F[:(:)]
+          IB, xB = IB[pcol], xB[pcol]
         end
         p = findfirst(IB .> n)
       end
       @assert length(Irows) > 0
-      x, z, status = simplexluup(co, A[Irows,1:n], b[Irows], IB, xB, L, U, MP, P, prow, Rs)
+      x, z, status = simplexluup(co, A[Irows,1:n], b[Irows], IB, L, U, prow, Rs, xB)
     else
-      x, z, status = simplexluup(co, A[:,1:n], b, IB, xB, L, U, MP, P, prow, Rs)
+      x, z, status = simplexluup(co, A[:,1:n], b, IB, L, U, prow, Rs, xB)
     end
   end
 
