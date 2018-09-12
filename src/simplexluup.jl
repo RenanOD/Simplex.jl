@@ -1,10 +1,10 @@
 export simplexluup
 
-function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 4000)
+function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 4000, maxupdates = 5)
   m, n = size(A)
   iter = 0
   P, MP = [], []
-  updates = 0; maxupdates = 5
+  updates = 0;
   if IB == 0 # construct artificial problem
     artificial = true
     signb = sign.(b)
