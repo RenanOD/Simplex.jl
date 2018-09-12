@@ -4,7 +4,7 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
   m, n = size(A)
   iter = 0
   P, MP = [], []
-  updates = 0
+  updates = 0; maxupdates = 5
   if IB == 0 # construct artificial problem
     artificial = true
     signb = sign.(b)
@@ -57,7 +57,7 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
     p = findfirst(apfrac, xq) # Bland's Rule
     xB -= xq * d; xB[p] = xq # update solution
     IB[p], IN[q] = IN[q], IB[p] # update indexes
-    if updates >= 0 # reset LU
+    if updates >= maxupdates # reset LU
       F = lufact(A[:,IB])
       L, U, prow, pcol, Rs = F[:(:)] # (Rs.*A)[prow,pcol] * x[pcol] = b[prow]
       IB, xB = IB[pcol], xB[pcol]
@@ -148,4 +148,3 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
 
   return x, z, status
 end
-
