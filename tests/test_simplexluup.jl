@@ -68,7 +68,6 @@ function test_transpluup()
       for t = 1:10
         m, n = scale_m * rand(2:5), scale_n * rand(2:5)
         A, b, c = transport_instance(m, n)
-        A = full(A)
 
         model = Model(solver = CbcSolver())
         @variable(model, x[1:m*n] >= 0)
