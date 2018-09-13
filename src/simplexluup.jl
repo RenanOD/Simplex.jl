@@ -3,7 +3,7 @@ export simplexluup
 function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 4000, maxupdates = 5)
   m, n = size(A)
   iter = 0
-  P, MP = [], []
+  P, MP = Vector{Vector{Int64}}(maxupdates), Vector{SparseVector{Float64,Int64}}(maxupdates)
   updates = 0;
   if IB == 0 # construct artificial problem
     artificial = true
@@ -61,26 +61,25 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
       F = lufact(A[:,IB])
       L, U, prow, pcol, Rs = F[:(:)] # (Rs.*A)[prow,pcol] * x[pcol] = b[prow]
       IB, xB = IB[pcol], xB[pcol]
-      MP, P = [], []
       updates = 0
     else # update LU
-      U[:,p] = w
-      push!(P, reverse(reverse(1:m,p,m),p,m-1))
-      U = U[:,P[end]]
-      push!(MP, spzeros(m-p))
-      for i in 1:m-p
-        (MP[end])[i] = U[p,p+i-1]/U[p+i,p+i-1]
-        U[p,i:m] -= (MP[end])[i]*U[p+i,i:m]
-      end
-      U = U[P[end],:]
-      IB, xB = IB[P[end]], xB[P[end]]
       updates += 1
+      U[:,p] = w
+      P[updates] = reverse(reverse(1:m,p,m),p,m-1)
+      U = U[:,P[updates]]
+      MP[updates] = spzeros(m-p)
+      for i in 1:m-p
+        (MP[updates])[i] = U[p,p+i-1]/U[p+i,p+i-1]
+        U[p,i:m] -= (MP[updates])[i]*U[p+i,i:m]
+      end
+      U = U[P[updates],:]
+      IB, xB = IB[P[updates]], xB[P[updates]]
     end
 
     lambda = U'\c[IB]
     for j in 1:updates
-      lambda[m-length(MP[end-j+1]):m-1] -= lambda[end]*MP[end-j+1]
-      lambda[P[end-j+1]] = lambda
+      lambda[m-length(MP[updates-j+1]):m-1] -= lambda[end]*MP[updates-j+1]
+      lambda[P[updates-j+1]] = lambda
     end
     if L == 0
       r = c[IN] - A[:,IN]'*lambda
@@ -112,7 +111,6 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
         F = lufact(A[Irows,IB])
         L, U, prow, pcol, Rs = F[:(:)]
         IB, xB = IB[pcol], xB[pcol]
-        MP, P = [], []
       end
       while p != 0
         q = 1
