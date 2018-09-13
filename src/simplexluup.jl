@@ -36,12 +36,12 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
   while !(q == 0 || iter >= max_iter)
     iter += 1
     @assert all(xB .>= 0)
-    w = (L==0)? A[:,IN[q]] : L\((A[:,IN[q]].*Rs)[prow])
+    w = (L==0) ? A[:,IN[q]] : L\((A[:,IN[q]].*Rs)[prow])
     for j in 1:updates
       w = w[P[j]]
-      w[end] -= dot(MP[j], w[m-length(MP[j]):m-1])
+      w[end] -= dot(MP[j], w)
     end
-    d = (U\w)
+    d = U\w
     apfrac = xB ./ d # relative variable changes to direction
     indpos = find(d .> 1e-12) # variables that decrease in d direction
     if length(indpos) == 0
@@ -66,10 +66,10 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
       U[:,p] = w
       P[updates] = reverse(reverse(1:m,p,m),p,m-1)
       U = U[:,P[updates]]
-      MP[updates] = spzeros(m-p)
-      for i in 1:m-p
-        (MP[updates])[i] = U[p,p+i-1]/U[p+i,p+i-1]
-        U[p,i:m] -= (MP[updates])[i]*U[p+i,i:m]
+      MP[updates] = spzeros(m)
+      for i in p:m-1 #1:m-p
+        (MP[updates])[i] = U[p,i]/U[i+1,i]
+        U[p,:] -= (MP[updates])[i]*U[i+1,:]
       end
       permute!(U, P[updates], 1:m)
       IB, xB = IB[P[updates]], xB[P[updates]]
@@ -77,7 +77,7 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
 
     lambda = U'\c[IB]
     for j in 1:updates
-      lambda[m-length(MP[updates-j+1]):m-1] -= lambda[end]*MP[updates-j+1]
+      lambda -= lambda[end]*MP[updates-j+1]
       lambda[P[updates-j+1]] = lambda
     end
     if L == 0
