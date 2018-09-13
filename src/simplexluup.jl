@@ -2,9 +2,8 @@ export simplexluup
 
 function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 4000, maxupdates = 5)
   m, n = size(A)
-  iter = 0
+  iter = 0; updates = 0
   P, MP = Vector{Vector{Int64}}(maxupdates), Vector{SparseVector{Float64,Int64}}(maxupdates)
-  updates = 0;
   if IB == 0 # construct artificial problem
     artificial = true
     signb = sign.(b)
@@ -25,9 +24,9 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
       xB = F\b
       L, U, prow, pcol, Rs = F[:(:)] # (Rs.*A)[prow,pcol] * x[pcol] = b[prow]
       IB, xB = IB[pcol], xB[pcol]
-      r = c[IN] - A[:,IN]'*((speye(m)[:,prow]*(L'\(U'\c[IB]))).*Rs)
+      r = c[IN] - A[:,IN]'*(ipermute!(L'\(U'\c[IB]),prow).*Rs)
     else
-      r = c[IN] - A[:,IN]'*((speye(m)[:,prow]*(L'\(U'\c[IB]))).*Rs)
+      r = c[IN] - A[:,IN]'*(ipermute!(L'\(U'\c[IB]),prow).*Rs)
     end
   end
   q = findfirst(r .< -1e-12) # Bland's Rule
@@ -72,7 +71,7 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
         (MP[updates])[i] = U[p,p+i-1]/U[p+i,p+i-1]
         U[p,i:m] -= (MP[updates])[i]*U[p+i,i:m]
       end
-      U = U[P[updates],:]
+      permute!(U, P[updates], 1:m)
       IB, xB = IB[P[updates]], xB[P[updates]]
     end
 
@@ -84,7 +83,7 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
     if L == 0
       r = c[IN] - A[:,IN]'*lambda
     else
-      r = c[IN] - A[:,IN]'*((speye(m)[:,prow]*(L'\lambda)).*Rs)
+      r = c[IN] - A[:,IN]'*(ipermute!(L'\lambda, prow).*Rs)
     end
     q = findfirst(r .< -1e-12) # Bland's Rule
   end
@@ -116,7 +115,7 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
         q = 1
         Ap = (prow==0)? A[Irows,IB[p]] : A[Irows,IB[p]][prow]
         PivotAp = findfirst(Ap .> 0)
-        while q <= length(IN) #searching for columns to substitute artificials in basis
+        while q <= length(IN) # searching for columns to substitute artificials in basis
           w = (L==0)? A[Irows,IN[q]] : L\((A[Irows,IN[q]].*Rs)[prow])
           if abs((U\w)[PivotAp]) > 1e-12
             break
