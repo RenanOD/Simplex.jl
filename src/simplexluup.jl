@@ -31,7 +31,6 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 100
     end
   end
   q = findfirst(r .< -1e-12) # Bland's Rule
-
   status = :Optimal
 
   while !(q == 0 || iter >= max_iter)
@@ -68,7 +67,7 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 100
       MP[updates] = spzeros(m)
       U[:,p] = w
       if nnz(X) < nnz(U)
-        X = spones(U)
+        X = similar(U)
       end
       halfperm!(X, U, P[updates])
       Xp = X[:,p]
@@ -104,7 +103,7 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 100
     z = dot(c, x)
   else
     if dot(xB, c[IB])/norm(xB) > 1e-12
-      status = :Infeasible
+      status = (iter >= max_iter) ? :UserLimit : :Infeasible
       I = find(IB .<= n - m)
       x[I] = xB[I]
       z = dot(co, x)
