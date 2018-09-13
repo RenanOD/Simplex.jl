@@ -1,8 +1,9 @@
 export simplexluup
 
-function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 4000, maxupdates = 5)
+function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 10000, maxupdates = 15)
   m, n = size(A)
   iter = 0; updates = 0
+  X = spzeros(0)
   P, MP = Vector{Vector{Int64}}(maxupdates), Vector{SparseVector{Float64,Int64}}(maxupdates)
   if IB == 0 # construct artificial problem
     artificial = true
@@ -36,7 +37,7 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
   while !(q == 0 || iter >= max_iter)
     iter += 1
     @assert all(xB .>= 0)
-    w = (L==0) ? A[:,IN[q]] : L\((A[:,IN[q]].*Rs)[prow])
+    w = (L == 0) ? A[:,IN[q]] : L\((A[:,IN[q]].*Rs)[prow])
     for j in 1:updates
       w = w[P[j]]
       w[end] -= dot(MP[j], w)
@@ -63,15 +64,20 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
       updates = 0
     else # update LU
       updates += 1
-      U[:,p] = w
       P[updates] = reverse(reverse(1:m,p,m),p,m-1)
-      U = U[:,P[updates]]
       MP[updates] = spzeros(m)
-      for i in p:m-1 #1:m-p
-        (MP[updates])[i] = U[p,i]/U[i+1,i]
-        U[p,:] -= (MP[updates])[i]*U[i+1,:]
+      U[:,p] = w
+      if nnz(X) < nnz(U)
+        X = spones(U)
       end
-      permute!(U, P[updates], 1:m)
+      halfperm!(X, U, P[updates])
+      Xp = X[:,p]
+      for i in p:m-1
+        (MP[updates])[i] = Xp[i]/X[i,i+1]
+        Xp = (-).(Xp, (MP[updates])[i]*X[:,i+1])
+      end
+      halfperm!(U, X, P[updates])
+      U[end,:] = Xp
       IB, xB = IB[P[updates]], xB[P[updates]]
     end
 
@@ -106,21 +112,18 @@ function simplexluup(c, A, b, IB=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 400
       deleteat!(IN, find(IN .> n))
       Irows = collect(1:m)
       p = findfirst(IB .> n)
-      if updates!=0
+      if updates != 0
         F = lufact(A[Irows,IB])
         L, U, prow, pcol, Rs = F[:(:)]
         IB, xB = IB[pcol], xB[pcol]
       end
       while p != 0
         q = 1
-        Ap = (prow==0)? A[Irows,IB[p]] : A[Irows,IB[p]][prow]
+        Ap = (prow == 0) ? A[Irows,IB[p]] : A[Irows,IB[p]][prow]
         PivotAp = findfirst(Ap .> 0)
         while q <= length(IN) # searching for columns to substitute artificials in basis
-          w = (L==0)? A[Irows,IN[q]] : L\((A[Irows,IN[q]].*Rs)[prow])
-          if abs((U\w)[PivotAp]) > 1e-12
-            break
-          end
-          q += 1
+          d = U\(L\((A[Irows,IN[q]].*Rs)[prow]))
+          (abs(d[PivotAp]) > 1e-12) ? break : q += 1
         end
         if q > length(IN)
           deleteat!(Irows, findfirst(A[Irows,IB[p]]))
