@@ -14,7 +14,7 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
     co = collect(c); c = [zeros(n); ones(m)]
     U = A[:,𝔹]
     r = -A[:,ℕ]'*signb # artificial relative costs
-    xB = collect(abs.(b)) # solution in current basis
+    xB = abs.(b) # solution in current basis
 else
     artificial = false
     ℕ = setdiff(1:n, 𝔹)
@@ -35,7 +35,7 @@ else
   while !(q == 0 || iter >= max_iter)
     # finding viable columns to enter basis
     iter += 1
-    @assert all(xB .>= 0)
+    #@assert all(xB .>= 0)
     w = (L == 0) ? A[:,ℕ[q]] : L\((A[:,ℕ[q]].*Rs)[prow])
     for j in 1:ups
       w = w[P[j]]
@@ -49,8 +49,7 @@ else
     end
     indxq = indmin(apfrac[indpos])
     xq = apfrac[indpos[indxq]]
-    @assert xq >= 0
-    @assert xq < Inf
+    #@assert xq >= 0
     p = findfirst(apfrac, xq) # Bland's Rule
 
     # column change
@@ -65,9 +64,9 @@ else
       ups += 1
       P[ups] = reverse(reverse(1:m,p,m),p,m-1)
       MP[ups] = spzeros(m)
-      U[:,p] = w
+      U[:,p] .= w
       if nnz(Ufiller) < nnz(U)
-        Ufiller = similar(U)
+        nnz(Ufiller) == 0 ? Ufiller = similar(U) : copy!(Ufiller, U)
       end
       halfperm!(Ufiller, U, P[ups])
       Up = Ufiller[:,p]
@@ -83,17 +82,16 @@ else
     # check optimality and choose variable to leave basis if necessary
     λ = U'\c[𝔹]
     for j in 1:ups
-      λ -= λ[end]*MP[ups-j+1]
+      λ .= (-).(λ, λ[end]*MP[ups-j+1])
       λ[P[ups-j+1]] = λ
     end
     if L == 0
-      r = c[ℕ] - A[:,ℕ]'*λ
+      r .= (-).(c[ℕ], A[:,ℕ]'*λ)
     else
-      r = c[ℕ] - A[:,ℕ]'*(ipermute!(L'\λ, prow).*Rs)
+      r .= (-).(c[ℕ], A[:,ℕ]'*(ipermute!(L'\λ, prow).*Rs))
     end
     q = findfirst(r .< -1e-12) # Bland's Rule
   end
-
   if iter >= max_iter
     status = :UserLimit
   end
@@ -101,14 +99,14 @@ else
   # finalization
   x = zeros(n)
   if !artificial
-    x[𝔹] = xB
+    x[𝔹] .= xB
     z = dot(c, x)
   else
     Irows = collect(1:m)
     if dot(xB, c[𝔹])/norm(xB) > 1e-12
       status = (iter >= max_iter) ? :UserLimit : :Infeasible
       I = find(𝔹 .<= n - m)
-      x[I] = xB[I]
+      x[I] .= xB[I]
       z = dot(co, x)
     elseif maximum(𝔹) > n # check for artificial variables in basis
       # remove artificial variables from basis
@@ -140,7 +138,6 @@ else
         end
         p = findfirst(𝔹 .> n)
       end
-      @assert length(Irows) > 0
       return simplexluup(co, A[Irows,1:n], b[Irows], 𝔹, L, U, prow, Rs, xB)
     else
       return simplexluup(co, A[:,1:n], b, 𝔹, L, U, prow, Rs, xB)
