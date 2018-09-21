@@ -1,4 +1,3 @@
-using Simplex, Base.Test, JuMP, Cbc, Base.SparseArrays.halfperm!
 include("generators/transport_problem.jl")
 
 function test_simplexluup()

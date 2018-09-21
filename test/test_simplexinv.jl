@@ -78,7 +78,7 @@ function test_transpinv()
         xj = getvalue(x)
         zj = getobjectivevalue(model)
 
-        x, z, status = simplexinv(c, A, b, max_iter = 1000 * scale_m * scale_n)
+        x, z, status = simplexinv(c, full(A), b, max_iter = 1000 * scale_m * scale_n)
         Δz = dot(c, x) - zj
         # @test x ≈ xj
         @test dot(c, x) ≈ zj atol = 1e-3
@@ -88,4 +88,3 @@ function test_transpinv()
   end
 end
 test_transpinv()
-
