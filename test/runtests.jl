@@ -1,3 +1,5 @@
-using Simplex, Base.Test, JuMP, Cbc, Base.SparseArrays.halfperm!
+using Simplex, Base.Test
+Pkg.add("JuMP")
+Pkg.add("Cbc")
 include("test_simplexluup.jl")
 include("test_simplexinv.jl")
