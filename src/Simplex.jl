@@ -1,6 +1,5 @@
 module Simplex
-
-using Base.Test, JuMP, Cbc, Base.SparseArrays.halfperm!
+using JuMP, Cbc, Base.SparseArrays.halfperm!
 include("simplexluup.jl")
 include("simplexinv.jl")
 
