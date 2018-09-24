@@ -1,4 +1,3 @@
-using Simplex, Base.Test, JuMP, Cbc
 include("generators/transport_problem.jl")
 
 function test_simplexinv()
