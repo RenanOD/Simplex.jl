@@ -1,20 +1,27 @@
 export simplexluup
 
-#export simplexluup
-
 function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 10000, maxups = 15)
   # preparations
   m, n = size(A)
   iter = 0; ups = 0
   Ufiller = spzeros(0)
   P, MP = Vector{Vector{Int64}}(maxups), Vector{SparseVector{Float64,Int64}}(maxups)
+  lnz = Ref{Int64}(); unz = Ref{Int64}(); nz_diag = Ref{Int64}()
+  n_row = Ref{Int64}(); n_col = Ref{Int64}()
+  Lp = Vector{Int64}(m + 1); Up = Vector{Int64}(m + 1)
+  pcol = Vector{Int64}(m)
+  if Rs == 0
+    Rs = Vector{Float64}(m)
+    prow = Vector{Int64}(m)
+  end
+
   if 𝔹 == 0 # construct artificial problem
     artificial = true
-    signb = sign.(b)
-    A = [A spdiagm(signb)] # try to save A memory to return
+    signb = sign.(b*1.)
+    AN = copy(A); U = spdiagm(signb)
+    A = [A U] # try to save A memory to return
     𝔹 = collect(n+1:n+m); ℕ = collect(1:n) # artificial indexes
-    co = collect(c); c = [zeros(n); ones(m)] # try to save c to save memory
-    U = A[:,𝔹]; AN = A[:,ℕ]; cN = @view c[ℕ]
+    ca = [zeros(n); ones(m)]; cN = @view ca[ℕ]
     r = -(signb'*AN)' # artificial relative costs
     xB = abs.(b) # solution in current basis
   else
@@ -22,9 +29,20 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
     ℕ = setdiff(1:n, 𝔹)
     AN = A[:,ℕ]; cN = @view c[ℕ]
     if L == 0 # if user gives 𝔹
-      F = lufact(A[:,𝔹])
+      F = lufact(A[:,𝔹]) # (Rs.*A)[prow,pcol] * x[pcol] = b[prow]
       xB = F\b
-      L, U, prow, pcol, Rs = F[:(:)] # (Rs.*A)[prow,pcol] * x[pcol] = b[prow]
+      ccall(("umfpack_dl_get_lunz",:libumfpack),Int64,(Ptr{Int64},Ptr{Int64},
+            Ptr{Int64},Ptr{Int64},Ptr{Int64},Ptr{Void}),
+            lnz,unz,n_row,n_col,nz_diag,F.numeric)
+      Lj = Vector{Int64}(lnz[]); Lx = Vector{Float64}(lnz[])
+      Ui = Vector{Int64}(unz[]); Ux = Vector{Float64}(unz[])
+      ccall(("umfpack_dl_get_numeric",:libumfpack),Int64, (Ptr{Int64},
+             Ptr{Int64},Ptr{Float64},Ptr{Int64},Ptr{Int64},Ptr{Float64},
+             Ptr{Int64},Ptr{Int64},Ptr{Void},Ref{Int64},Ptr{Float64},
+             Ptr{Void}),Lp,Lj,Lx,Up,Ui,Ux,prow,pcol,C_NULL,0, Rs, F.numeric)
+      L = transpose(SparseMatrixCSC(m, m, increment!(Lp), increment!(Lj), Lx))
+      U = SparseMatrixCSC(m, m, increment!(Up), increment!(Ui), Ux)
+      increment!(prow); increment!(pcol)
       𝔹, xB = 𝔹[pcol], xB[pcol]
       r = cN - ((ipermute!(L'\(U'\c[𝔹]),prow).*Rs)'*AN)'
     else
@@ -37,11 +55,10 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
   # simplex search
   apfrac = Array{Float64, 1}(m)
   w = Array{Float64, 1}(m); d = Array{Float64, 1}(m)
-  λ = Array{Float64, 1}(m); Up = Array{Float64, 1}(m)
+  λ = Array{Float64, 1}(m); Ucolp = Array{Float64, 1}(m)
   while !(q == 0 || iter >= max_iter)
     # finding viable columns to enter basis
     iter += 1
-    #@assert all(xB .>= 0)
     (L == 0) ? w .= A[:,ℕ[q]] : w .= L\((A[:,ℕ[q]].*Rs)[prow])
     for j in 1:ups
       permute!(w, P[j])
@@ -49,21 +66,30 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
     end
     d .= U\w
     apfrac .= xB ./ d # relative variable changes to direction
-    indpos = find(d .> 1e-12) # variables that decrease in d direction
-    if length(indpos) == 0
+    apfracpos = apfrac[find(d .> 1e-12)] # variables that decrease in d direction
+    if length(apfracpos) == 0
       status = :Unbounded; break
     end
-    indxq = indmin(apfrac[indpos])
-    xq = apfrac[indpos[indxq]]
-    #@assert xq >= 0
+    xq = minimum(apfracpos)
     p = findfirst(apfrac, xq) # Bland's Rule
 
     # column change
-    xB -= xq * d; xB[p] = xq # upfiz minha inscrição no SIICUSP/2018 poisdate solution
+    xB -= xq*d; xB[p] = xq # update solution
     𝔹[p], ℕ[q] = ℕ[q], 𝔹[p] # update indexes
     if ups >= maxups # reset LU
       F = lufact(A[:,𝔹])
-      L, U, prow, pcol, Rs = F[:(:)] # (Rs.*A)[prow,pcol]*x = b[prow]
+      ccall(("umfpack_dl_get_lunz",:libumfpack), Int64,(Ptr{Int64},Ptr{Int64},
+            Ptr{Int64},Ptr{Int64},Ptr{Int64},Ptr{Void}),
+            lnz,unz,n_row,n_col,nz_diag,F.numeric)
+      Lj = Vector{Int64}(lnz[]); Lx = Vector{Float64}(lnz[])
+      Ui = Vector{Int64}(unz[]); Ux = Vector{Float64}(unz[])
+      ccall(("umfpack_dl_get_numeric",:libumfpack),Int64, (Ptr{Int64},
+             Ptr{Int64},Ptr{Float64},Ptr{Int64},Ptr{Int64},Ptr{Float64},
+             Ptr{Int64},Ptr{Int64},Ptr{Void},Ref{Int64},Ptr{Float64},
+             Ptr{Void}),Lp,Lj,Lx,Up,Ui,Ux,prow,pcol,C_NULL,0, Rs, F.numeric)
+      L = transpose(SparseMatrixCSC(m, m, increment!(Lp), increment!(Lj), Lx))
+      U = SparseMatrixCSC(m, m, increment!(Up), increment!(Ui), Ux)
+      increment!(prow); increment!(pcol)
       𝔹, xB = 𝔹[pcol], xB[pcol]
       ups = 0
     else # update LU
@@ -75,27 +101,27 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
       P[ups] = reverse(reverse(1:m,p,m),p,m-1)
       MP[ups] = spzeros(m)
       halfperm!(Ufiller, U, P[ups])
-      Up .= Ufiller[:,p]
+      Ucolp .= Ufiller[:,p]
       for i in p:m-1
-        (MP[ups])[i] = Up[i]/Ufiller[i,i+1]
+        (MP[ups])[i] = Ucolp[i]/Ufiller[i,i+1]
         for j in nzrange(Ufiller,i+1)
-          Up[Ufiller.rowval[j]] -= (MP[ups])[i]*Ufiller.nzval[j]
+          Ucolp[Ufiller.rowval[j]] -= (MP[ups])[i]*Ufiller.nzval[j]
         end
-        Ufiller[i, p] = 0
+        Ufiller[i, p] = 0.
       end
-      Ufiller[end,p] = Up[end]
+      Ufiller[end,p] = Ucolp[end]
       halfperm!(U, Ufiller, P[ups])
       𝔹, xB = 𝔹[P[ups]], xB[P[ups]]
     end
 
     # check optimality and choose variable to leave basis if necessary
-    λ .= U'\(@view c[𝔹])
+    artificial ? λ .= U'\(@view ca[𝔹]) : λ .= U'\(@view c[𝔹])
     for j in 1:ups
       λ .= (-).(λ, λ[end]*MP[ups-j+1])
-      λ[P[ups-j+1]] = λ
-  end
+      ipermute!(λ, P[ups-j+1])
+    end
     AN[:,q] = A[:,ℕ[q]] # do something similar to 𝔹, use a for
-    (L==0) ? r .= (-).(cN, (λ'*AN)') : r .= (-).(cN, ((ipermute!(L\λ, prow).*Rs)'*AN)')
+    (L==0) ? r .= (-).(cN, (λ'*AN)') : r .= (-).(cN, ((ipermute!(L'\λ, prow).*Rs)'*AN)')
     q = findfirst(r .< -1e-12) # Bland's Rule
   end
   if iter >= max_iter
@@ -109,11 +135,11 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
     z = dot(c, x)
   else
     Irows = collect(1:m)
-    if dot(xB, c[𝔹])/norm(xB) > 1e-12
+    if dot(xB, ca[𝔹])/norm(xB) > 1e-12
       status = (iter >= max_iter) ? :UserLimit : :Infeasible
       I = find(𝔹 .<= n - m)
       x[𝔹[I]] = xB[I]
-      z = dot(co, x)
+      z = dot(c, x)
     elseif maximum(𝔹) > n # check for artificial variables in basis
       # remove artificial variables from basis
       deleteat!(ℕ, find(ℕ .> n))
@@ -139,7 +165,7 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
           F = lufact(A[Irows,𝔹])
           L, U, prow, pcol, Rs = F[:(:)]
           𝔹, xB = 𝔹[pcol], xB[pcol]
-        else # falta trocar a coluna
+        else
           𝔹[p] = ℕ[q]
           F = lufact(A[Irows,𝔹])
           L, U, prow, pcol, Rs = F[:(:)]
@@ -147,9 +173,9 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
         end
         p = findfirst(𝔹 .> n)
       end
-      return simplexluup(co, A[Irows,1:n], b[Irows], 𝔹, L, U, prow, Rs, xB) # stop creating matrix to return
+      return simplexluup(c, A[Irows,1:n], b[Irows], 𝔹, L, U, prow, Rs, xB) # stop creating matrix to return
     else
-      return simplexluup(co, A[:,1:n], b, 𝔹, L, U, prow, Rs, xB)
+      return simplexluup(c, A[:,1:n], b, 𝔹, L, U, prow, Rs, xB)
     end
   end
   return x, z, status
