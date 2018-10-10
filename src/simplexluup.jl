@@ -145,19 +145,23 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
       # remove artificial variables from basis
       deleteat!(ℕ, find(ℕ .> n))
       p = findfirst(𝔹 .> n)
-      if ups != 0
-        F = lufact(A[Irows,𝔹])
-        L, U, prow, pcol, Rs = F[:(:)]
-        copy!(tempperm, pcol); permute!!(𝔹, tempperm)
-        copy!(tempperm, pcol); permute!!(xB, tempperm)
-      end
       Ap = Array{Float64, 1}(m)
       while p != 0
         q = 1
-        (prow == 0) ? Ap .= A[Irows,𝔹[p]] : Ap .= A[Irows,𝔹[p]][prow]
+        (L == 0) ? Ap .= A[Irows,𝔹[p]] : Ap .= A[Irows,𝔹[p]][prow]
+        for j in 1:ups
+          copy!(tempperm, P[j])
+          permute!!(Ap, tempperm)
+        end
         PivotAp = findfirst(Ap .> 0)
         while q <= length(ℕ) # searching for columns to substitute artificials ℕ basis
-          d .= U\(L\((A[Irows,ℕ[q]].*Rs)[prow]))
+          (L == 0) ? d .= A[:,ℕ[q]] : d .= L\((A[:,ℕ[q]].*Rs)[prow])
+          for j in 1:ups
+            copy!(tempperm, P[j])
+            permute!!(d, tempperm)
+            d[end] -= dot(MP[j], d)
+          end
+          d .= U\d
           (abs(d[PivotAp]) > 1e-12) ? break : q += 1
         end
         if q > length(ℕ)
@@ -169,6 +173,7 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
         end
         F = lufact(A[Irows,𝔹])
         L, U, prow, pcol, Rs = F[:(:)]
+        ups = 0
         copy!(tempperm, pcol); permute!!(𝔹, tempperm)
         copy!(tempperm, pcol); permute!!(xB, tempperm)
         p = findfirst(𝔹 .> n)
