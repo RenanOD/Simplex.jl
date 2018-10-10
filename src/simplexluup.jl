@@ -10,6 +10,7 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
   n_row = Ref{Int64}(); n_col = Ref{Int64}()
   Lp = Vector{Int64}(m + 1); Up = Vector{Int64}(m + 1)
   pcol = Vector{Int64}(m)
+  tempperm = Vector{Int64}(m)
   if Rs == 0
     Rs = Vector{Float64}(m)
     prow = Vector{Int64}(m)
@@ -33,7 +34,8 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
       F = lufact(A[:,𝔹]) # (Rs.*A)[prow,pcol] * x[pcol] = b[prow]
       xB = F\b
       L, U, prow, pcol, Rs = F[:(:)]
-      𝔹, xB = 𝔹[pcol], xB[pcol]
+      copy!(tempperm, pcol); permute!!(𝔹, tempperm)
+      copy!(tempperm, pcol); permute!!(xB, tempperm)
       r = cN - ((ipermute!(L'\(U'\c[𝔹]),prow).*Rs)'*AN)'
     else
       r = cN - ((ipermute!(L'\(U'\c[𝔹]),prow).*Rs)'*AN)'
@@ -51,7 +53,8 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
     iter += 1
     (L == 0) ? w .= A[:,ℕ[q]] : w .= L\((A[:,ℕ[q]].*Rs)[prow])
     for j in 1:ups
-      permute!(w, P[j])
+      copy!(tempperm, P[j])
+      permute!!(w, tempperm)
       w[end] -= dot(MP[j], w)
     end
     d .= U\w
@@ -84,7 +87,8 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
       end
       copy!(U, SparseMatrixCSC(m, m, increment!(Up), increment!(Ui), Ux))
       increment!(prow); increment!(pcol)
-      𝔹, xB = 𝔹[pcol], xB[pcol]
+      copy!(tempperm, pcol); permute!!(𝔹, tempperm)
+      copy!(tempperm, pcol); permute!!(xB, tempperm)
       ups = 0
     else # update LU
       ups += 1
@@ -114,7 +118,8 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
     artificial ? λ .= U'\(@view ca[𝔹]) : λ .= U'\(@view c[𝔹])
     for j in 1:ups
       λ .= (-).(λ, λ[end]*MP[ups-j+1])
-      ipermute!(λ, P[ups-j+1])
+      copy!(tempperm, P[ups-j+1])
+      ipermute!!(λ, tempperm)
     end
     AN[:,q] = A[:,ℕ[q]] # do something similar to 𝔹, use a for
     (L==0) ? r .= (-).(cN, (λ'*AN)') : r .= (-).(cN, ((ipermute!(L'\λ, prow).*Rs)'*AN)')
@@ -143,7 +148,8 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
       if ups != 0
         F = lufact(A[Irows,𝔹])
         L, U, prow, pcol, Rs = F[:(:)]
-        𝔹, xB = 𝔹[pcol], xB[pcol]
+        copy!(tempperm, pcol); permute!!(𝔹, tempperm)
+        copy!(tempperm, pcol); permute!!(xB, tempperm)
       end
       Ap = Array{Float64, 1}(m)
       while p != 0
@@ -163,7 +169,8 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
         end
         F = lufact(A[Irows,𝔹])
         L, U, prow, pcol, Rs = F[:(:)]
-        𝔹, xB = 𝔹[pcol], xB[pcol]
+        copy!(tempperm, pcol); permute!!(𝔹, tempperm)
+        copy!(tempperm, pcol); permute!!(xB, tempperm)
         p = findfirst(𝔹 .> n)
       end
       return simplexluup(c, Ao[Irows,:], b[Irows], 𝔹, L, U, prow, Rs, xB)
