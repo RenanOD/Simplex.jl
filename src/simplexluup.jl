@@ -155,7 +155,7 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
         end
         PivotAp = findfirst(Ap .> 0)
         while q <= length(ℕ) # searching for columns to substitute artificials ℕ basis
-          (L == 0) ? d .= A[:,ℕ[q]] : d .= L\((A[:,ℕ[q]].*Rs)[prow])
+          (L == 0) ? d .= A[Irows,ℕ[q]] : d .= L\((A[Irows,ℕ[q]].*Rs)[prow])
           for j in 1:ups
             copy!(tempperm, P[j])
             permute!!(d, tempperm)
