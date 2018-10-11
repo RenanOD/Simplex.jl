@@ -18,8 +18,8 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
   if 𝔹 == 0 # construct artificial problem
     artificial = true
     signb = sign.(b*1.)
-    AN = A; Ao = A
-    U = spdiagm(signb); A = [Ao U]
+    AN = copy(A); Ao = A
+    U = spdiagm(signb); A = [A U]
     𝔹 = collect(n+1:n+m); ℕ = collect(1:n) # artificial indexes
     ca = [zeros(n); ones(m)]; cN = @view ca[ℕ]; cB = @view ca[𝔹]
     r = -(signb'*AN)' # artificial relative costs
@@ -89,7 +89,7 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
       ups = 0
     else # update LU
       U[:,p] .= w
-      if find(w)[end] > p
+      if findlast(w) > p
         ups += 1
         P[ups] = reverse(reverse(1:m,p,m),p,m-1)
         MP[ups] = spzeros(m)
@@ -116,7 +116,7 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
     end
 
     # check optimality and choose variable to leave basis if necessary
-    artificial ? λ .= U'\cB : λ .= U'\cB
+    λ .= U'\cB
     for j in 1:ups
       λ .= (-).(λ, λ[end]*MP[ups-j+1])
       copy!(tempperm, P[ups-j+1])
