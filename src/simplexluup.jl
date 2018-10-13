@@ -1,5 +1,17 @@
 export simplexluup
 
+#myprod is equivalent to xD = (l'*AN)'
+function myprod!(xD,l,A,N)
+  xD .= 0
+  for (colN,colA) in enumerate(N)
+    for i in nzrange(A,colA)
+      if l[A.rowval[i]] != 0
+        xD[colN] += l[A.rowval[i]]*A.nzval[i]
+      end
+    end
+  end
+end
+
 function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 10000, maxups = 15)
 
   m, n = size(A) # preparations
@@ -18,25 +30,30 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
   if 𝔹 == 0 # construct artificial problem
     artificial = true
     signb = sign.(b*1.)
-    AN = copy(A); Ao = A
+    Ao = A
     U = spdiagm(signb); A = [A U]
     𝔹 = collect(n+1:n+m); ℕ = collect(1:n) # artificial indexes
     ca = [zeros(n); ones(m)]; cN = @view ca[ℕ]; cB = @view ca[𝔹]
-    r = -(signb'*AN)' # artificial relative costs
+    xD = Vector{Float64}(n)
+    myprod!(xD,signb,A,ℕ)
+    r = -xD # artificial relative costs
     xB = abs.(b) # solution in current basis
   else
     artificial = false
     ℕ = setdiff(1:n, 𝔹)
-    AN = A[:,ℕ]; cN = @view c[ℕ]; cB = @view c[𝔹]
+    xD = Vector{Float64}(n-m)
+    cN = @view c[ℕ]; cB = @view c[𝔹]
     if L == 0
       F = lufact(A[:,𝔹]) # (Rs.*A)[prow,pcol] * x[pcol] = b[prow]
       xB = F\b
       L, U, prow, pcol, Rs = F[:(:)]
       copy!(tempperm, pcol); permute!!(𝔹, tempperm)
       permute!!(xB, pcol) #pcol is lost
-      r = cN - ((ipermute!(L'\(U'\cB),prow).*Rs)'*AN)'
+      myprod!(xD,ipermute!(L'\(U'\cB),prow).*Rs,A,ℕ)
+      r = cN - xD
     else
-      r = cN - ((ipermute!(L'\(U'\cB),prow).*Rs)'*AN)'
+      myprod!(xD,ipermute!(L'\(U'\cB),prow).*Rs,A,ℕ)
+      r = cN - xD
     end
   end
   q = findfirst(r .< -1e-12) # Bland's Rule
@@ -122,12 +139,13 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
       copy!(tempperm, P[ups-j+1])
       ipermute!!(λ, tempperm)
     end
-    AN[:,q] = A[:,ℕ[q]] # do something similar to 𝔹, use a for
     if L == 0
-      r .= (-).(cN, (λ'*AN)')
+      myprod!(xD,λ,A,ℕ)
+      r .= (-).(cN, xD)
     else
       copy!(tempperm, prow)
-      r .= (-).(cN, ((ipermute!!(L'\λ, tempperm).*Rs)'*AN)')
+      myprod!(xD,ipermute!!(L'\λ, tempperm).*Rs,A,ℕ)
+      r .= (-).(cN, xD)
     end
     q = findfirst(r .< -1e-12) # Bland's Rule
   end
