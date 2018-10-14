@@ -2,8 +2,9 @@ export simplexluup
 
 # myprod! is equivalent to xD = (l'*A[:,N])'
 # avoids creating A[:,N]
-function myprod!(xD,l,A,N)
-  xD .= 0
+function myprod!(xD::Vector{Float64}, l::Vector{Float64},
+                 A::SparseMatrixCSC{Float64,Int64}, N::Vector{Int64})
+  xD .= 0.
   for (colN,colA) in enumerate(N)
     for i in nzrange(A,colA)
       if l[A.rowval[i]] != 0
@@ -15,8 +16,8 @@ end
 
 # getcX! is equivalent to l .= c[X]
 # avoids creating a vector when calling c[X]
-function getcX!(l,c,X)
-  l .= 0
+function getcX!(l::Vector{Float64}, c::Vector{Float64}, X::Vector{Int64})
+  l .= 0.
   for (i,j) in enumerate(X)
     l[i] = c[j]
   end
@@ -24,14 +25,16 @@ end
 
 # getAcol! is equivalent to l .= A[:,col]
 # avoids creating a vector when calling A[:,col]
-function getAcol!(l,A,col)
-  l .= 0
+function getAcol!(l::Vector{Float64},
+                  A::SparseMatrixCSC{Float64,Int64}, col::Int64)
+  l .= 0.
   for i in nzrange(A,col)
     l[A.rowval[i]] = A.nzval[i]
   end
 end
-function getAcol!(l,A,col,Irows)
-  l .= 0; j = 0
+function getAcol!(l::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
+                  col::Int64, Irows::Vector{Int64})
+  l .= 0.; j = 0
   for i in nzrange(A,col)
     j = findfirst(Irows,A.rowval[i])
     if j != 0
@@ -40,8 +43,27 @@ function getAcol!(l,A,col,Irows)
   end
 end
 
+# same as l -= z*a
+function subdot!(l::Vector{Float64},a,z::Float64,m::Int64)
+  for i in 1:m
+    if a[i] != 0
+      l[i] -= z*a[i]
+    end
+  end
+end
 
-function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 10000, maxups = 15)
+#returns l[perm] without allocating unnecessary memory
+#returns l[invperm(perm)] if inv = true
+function savepermute!(tempperm, perm, l; inv::Bool = false)
+  copy!(tempperm, perm)
+  !inv ? permute!!(l, tempperm) : ipermute!!(l, tempperm)
+end
+
+
+function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
+                     b::Vector{Float64}, 𝔹=0, L=0, U=0, prow::Vector{Int64}=Int64[],
+                     Rs::Vector{Float64}=Float64[], xB::Vector{Float64}=Float64[];
+                     max_iter::Int64 = 10000, maxups::Int64 = 15)
 
   m, n = size(A) # preparations
   iter = 0; ups = 0; maxed = false
@@ -52,14 +74,13 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
   n_row = Ref{Int64}(); n_col = Ref{Int64}()
   Lp = Vector{Int64}(m + 1); Up = Vector{Int64}(m + 1)
   pcol = Vector{Int64}(m); tempperm = Vector{Int64}(m)
-  if Rs == 0
+  if L == 0
     Rs = Vector{Float64}(m)
     prow = Vector{Int64}(m)
   end
 
   if 𝔹 == 0 # construct artificial problem
     artificial = true
-    b = b*1.
     signb = sign.(b)
     Ao = A
     U = spdiagm(signb); A = [A U]
@@ -81,16 +102,18 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
       xB = F\b
       L, U, prow, pcol, Rs = F[:(:)]
       Utri = UpperTriangular(U); Ltri = LowerTriangular(L)
-      copy!(tempperm, pcol); permute!!(𝔹, tempperm)
+      savepermute!(tempperm, pcol, 𝔹)
       permute!!(xB, pcol) # pcol is lost
       At_ldiv_B!(Utri,cB); At_ldiv_B!(Ltri,cB)
-      ipermute!(cB,prow); cB .= cB.*Rs
+      savepermute!(tempperm, prow, cB, inv = true)
+      cB .= cB.*Rs
       myprod!(xD,cB,A,ℕ)
       r = (-).(cN, xD)
     else
       Utri = UpperTriangular(U); Ltri = LowerTriangular(L)
       At_ldiv_B!(Utri,cB); At_ldiv_B!(Ltri,cB)
-      ipermute!(cB,prow); cB .= cB.*Rs
+      savepermute!(tempperm, prow, cB, inv = true)
+      cB .= cB.*Rs
       myprod!(xD,cB,A,ℕ)
       r = (-).(cN, xD)
     end
@@ -110,18 +133,18 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
     else
       getAcol!(w,A,ℕ[q])
       w .= w.*Rs
-      copy!(tempperm, prow); permute!!(w, tempperm)
+      savepermute!(tempperm, prow, w)
       A_ldiv_B!(Ltri,w)
     end
     for j in 1:ups
-      copy!(tempperm, P[j]); permute!!(w, tempperm)
+      savepermute!(tempperm, P[j], w)
       w[end] -= dot(MP[j], w)
     end
     d .= w
     A_ldiv_B!(Utri,d)
     apfrac .= xB ./ d # relative variable changes to direction
     xq = Inf
-    for i in 1:m
+    for i in 1:m # find min(apfrac[d .> 0])
       if d[i] > 1e-12
         if apfrac[i] < xq
           xq = apfrac[i]
@@ -134,11 +157,7 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
     end
 
     # column change
-    for i in 1:m # same as xB .-= xq*d
-      if d[i] != 0
-        xB[i] -= xq*d[i]
-      end
-    end
+    subdot!(xB,d,xq,m)
     xB[p] = xq # update solution
     𝔹[p], ℕ[q] = ℕ[q], 𝔹[p] # update indexes
     if ups >= maxups # reset LU
@@ -161,14 +180,18 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
       end
       copy!(U, SparseMatrixCSC(m, m, increment!(Up), increment!(Ui), Ux))
       increment!(prow); increment!(pcol)
-      copy!(tempperm, pcol); permute!!(𝔹, tempperm)
+      savepermute!(tempperm, pcol, 𝔹)
       permute!!(xB, pcol) # pcol is lost
       ups = 0
     else # update LU
       U[:,p] .= w
       if findlast(w) > p
         ups += 1
-        maxed? P[ups] .= reverse(reverse(1:m,p,m),p,m-1) : P[ups] = reverse(reverse(1:m,p,m),p,m-1)
+        if maxed
+          P[ups] .= 1:m; reverse!(reverse!(P[ups],p,m),p,m-1)
+        else
+          P[ups] = 1:m; reverse!(reverse!(P[ups],p,m),p,m-1)
+        end
         maxed? MP[ups] .= spzeros(m) : MP[ups] = spzeros(m)
         if nnz(Ufiller) < nnz(U)
           nnz(Ufiller) == 0 ? Ufiller = similar(U) : copy!(Ufiller, U)
@@ -187,8 +210,8 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
         Ufiller[end,p] = Ucolp[end]
         dropzeros!(Ufiller)
         halfperm!(U, Ufiller, P[ups])
-        copy!(tempperm, P[ups]); permute!!(𝔹, tempperm)
-        copy!(tempperm, P[ups]); permute!!(xB, tempperm)
+        savepermute!(tempperm, P[ups], 𝔹)
+        savepermute!(tempperm, P[ups], xB)
       end
     end
 
@@ -196,9 +219,8 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
     artificial? getcX!(λ,ca,𝔹) : getcX!(λ,c,𝔹)
     At_ldiv_B!(Utri,λ)
     for j in 1:ups
-      λ .= (-).(λ, λ[end]*MP[ups-j+1])
-      copy!(tempperm, P[ups-j+1])
-      ipermute!!(λ, tempperm)
+      subdot!(λ,MP[ups-j+1],λ[end],m)
+      savepermute!(tempperm, P[ups-j+1], λ, inv = true)
     end
     if L == 0
       myprod!(xD,λ,A,ℕ)
@@ -206,7 +228,7 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
       r .= (-).(cN, xD)
     else
       At_ldiv_B!(Ltri,λ)
-      copy!(tempperm, prow); ipermute!!(λ,tempperm)
+      savepermute!(tempperm, prow, λ, inv = true)
       λ .= λ.*Rs
       myprod!(xD,λ,A,ℕ)
       artificial? getcX!(cN,ca,ℕ) : getcX!(cN,c,ℕ)
@@ -242,10 +264,10 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
           getAcol!(Ap,A,𝔹[p],Irows)
         else
           getAcol!(Ap,A,𝔹[p],Irows)
-          copy!(tempperm, prow); permute!!(Ap, tempperm)
+          savepermute!(tempperm, prow, Ap)
         end
         for j in 1:ups
-          copy!(tempperm, P[j]); permute!!(Ap, tempperm)
+          savepermute!(tempperm, P[j], Ap)
         end
         PivotAp = findfirst(Ap)
         while q <= length(ℕ) # searching for columns to substitute artificials ℕ basis
@@ -254,11 +276,11 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
           else
             getAcol!(d,A,ℕ[q],Irows)
             d .= d.*Rs
-            copy!(tempperm, prow); permute!!(d, tempperm)
+            savepermute!(tempperm, prow, d)
             A_ldiv_B!(Ltri,d)
           end
           for j in 1:ups
-            copy!(tempperm, P[j]); permute!!(d, tempperm)
+            savepermute!(tempperm, P[j], d)
             d[end] -= dot(MP[j], d)
           end
           A_ldiv_B!(Utri,d)
@@ -275,7 +297,7 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
         L, U, prow, pcol, Rs = F[:(:)]
         Utri = UpperTriangular(U); Ltri = LowerTriangular(L)
         ups = 0
-        copy!(tempperm, pcol); permute!!(𝔹, tempperm)
+        savepermute!(tempperm, pcol, 𝔹)
         permute!!(xB, pcol) # pcol is lost
         p = findfirst(𝔹 .> n)
       end
@@ -286,3 +308,4 @@ function simplexluup(c, A, b, 𝔹=0, L=0, U=0, prow=0, Rs=0, xB=0; max_iter = 1
   end
   return x, z, status
 end
+

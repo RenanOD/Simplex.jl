@@ -4,9 +4,9 @@
 # the routes that minize costs of transport.
 
 function transport_instance(m, n)
-  c = rand(100:1000, m * n)
+  c = rand(100.:1000, m * n)
 
-  availArr, demandArr = rand(100:1000, m), rand(100:1000, n)
+  availArr, demandArr = rand(100.:1000, m), rand(100.:1000, n)
   diff = sum(availArr) - sum(demandArr)
   if diff > 0
     demandArr[rand(1:size(demandArr)[1])] += diff
