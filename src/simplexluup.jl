@@ -44,8 +44,13 @@ function getAcol!(l::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
 end
 
 # same as l -= z*a where z is a number
-function subdot!(l::Vector{Float64},a,z::Float64,m::Int64)
-  for i in 1:m
+function subdot!(l::Vector{Float64},a::SparseVector{Float64,Int64},z::Float64)
+  for (i, j) in enumerate(a.nzind)
+    l[j] -= z*a.nzval[i]
+  end
+end
+function subdot!(l::Vector{Float64},a::Vector{Float64},z::Float64)
+  for i in 1:length(a)
     if a[i] != 0
       l[i] -= z*a[i]
     end
@@ -61,17 +66,17 @@ end
 
 function getq(r::Vector{Float64}) # Bland's Rule
   for (i,j) in enumerate(r)
-    if (j < -1e-12)
+    if j < -1e-12
       return i
     end
   end
   return 0
 end
 
-function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
-                     b::Vector{Float64}, 𝔹=0, L=0, U=0, prow=Vector{Int64}(A.m),
-                     Rs=Vector{Float64}(A.m), xB::Vector{Float64}=Float64[];
-                     max_iter::Int64 = 10000, maxups::Int64 = 15)
+function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::Vector{Float64},
+                     𝔹=0, L=0, U::SparseMatrixCSC{Float64,Int64} = spdiagm(sign.(b)),
+                     prow=Vector{Int64}(A.m), Rs=Vector{Float64}(A.m),
+                     xB::Vector{Float64}=Float64[]; max_iter::Int64 = 10000, maxups::Int64 = 15)
 
   m, n = A.m, A.n # preparations
   iter = 0; ups = 0; maxed = false
@@ -84,7 +89,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
   if 𝔹 == 0 # construct artificial problem
     artificial = true
     Ao = A
-    U = spdiagm(sign.(b)); A = [A U]
+    A = [A U]
     Utri = UpperTriangular(U)
     Ut = transpose(U); Uttri = LowerTriangular(Ut)
     𝔹 = collect(n+1:n+m); ℕ = collect(1:n) # artificial indexes
@@ -118,7 +123,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
 
   # simplex search
   apfrac = Array{Float64,1}(m)
-  w = Array{Float64,1}(m); d = Array{Float64,1}(m)
+  w = Array{Float64,1}(m); d = Vector{Float64}(m)
   λ = Array{Float64,1}(m); Ucolp = Array{Float64,1}(m)
   
   while !(q == 0 || iter >= max_iter)
@@ -151,7 +156,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
     end
 
     # column change
-    subdot!(xB,d,xq,m)
+    subdot!(xB,d,xq)
     xB[p] = xq # update solution
     𝔹[p], ℕ[q] = ℕ[q], 𝔹[p] # update indexes
     if ups >= maxups # reset LU
@@ -168,7 +173,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
              Ptr{Void}),Lp,Lj,Lx,Up,Ui,Ux,prow,pcol,C_NULL,0, Rs, F.numeric)
       if L == 0
         L = transpose(SparseMatrixCSC(m, m, increment!(Lp), increment!(Lj), Lx))
-        Ltri = LowerTriangular(L);
+        Ltri = LowerTriangular(L)
         Lt = transpose(L); Lttri = UpperTriangular(Lt)
       else
         copy!(L, transpose(SparseMatrixCSC(m, m, increment!(Lp), increment!(Lj), Lx)))
@@ -218,7 +223,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
     transpose!(Ut,U)
     A_ldiv_B!(Uttri,λ)
     for j in 1:ups
-      subdot!(λ,MP[ups-j+1],λ[end],m)
+      subdot!(λ,MP[ups-j+1],λ[end])
       savepermute!(tempperm, P[ups-j+1], λ, true)
     end
     if L == 0
