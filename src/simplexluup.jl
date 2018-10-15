@@ -1,14 +1,14 @@
 export simplexluup
 
-# myprod! is equivalent to xD = (l'*A[:,N])'
+# myprod! is equivalent to r = (l'*A[:,N])'
 # avoids creating A[:,N]
-function myprod!(xD::Vector{Float64}, l::Vector{Float64},
+function myprod!(r::Vector{Float64}, l::Vector{Float64},
                  A::SparseMatrixCSC{Float64,Int64}, N::Vector{Int64})
-  xD .= 0.
+  r .= 0.
   for (colN,colA) in enumerate(N)
     for i in nzrange(A,colA)
       if l[A.rowval[i]] != 0
-        xD[colN] += l[A.rowval[i]]*A.nzval[i]
+        r[colN] += l[A.rowval[i]]*A.nzval[i]
       end
     end
   end
@@ -43,7 +43,7 @@ function getAcol!(l::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
   end
 end
 
-# same as l -= z*a
+# same as l -= z*a where z is a number
 function subdot!(l::Vector{Float64},a,z::Float64,m::Int64)
   for i in 1:m
     if a[i] != 0
@@ -54,84 +54,78 @@ end
 
 #returns l[perm] without allocating unnecessary memory
 #returns l[invperm(perm)] if inv = true
-function savepermute!(tempperm, perm, l; inv::Bool = false)
+function savepermute!(tempperm, perm, l, inv::Bool = false)
   copy!(tempperm, perm)
   !inv ? permute!!(l, tempperm) : ipermute!!(l, tempperm)
 end
 
+function getq(r::Vector{Float64}) # Bland's Rule
+  for (i,j) in enumerate(r)
+    if (j < -1e-12)
+      return i
+    end
+  end
+  return 0
+end
 
 function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
-                     b::Vector{Float64}, 𝔹=0, L=0, U=0, prow::Vector{Int64}=Int64[],
-                     Rs::Vector{Float64}=Float64[], xB::Vector{Float64}=Float64[];
+                     b::Vector{Float64}, 𝔹=0, L=0, U=0, prow=Vector{Int64}(A.m),
+                     Rs=Vector{Float64}(A.m), xB::Vector{Float64}=Float64[];
                      max_iter::Int64 = 10000, maxups::Int64 = 15)
 
-  m, n = size(A) # preparations
+  m, n = A.m, A.n # preparations
   iter = 0; ups = 0; maxed = false
-  Ufiller = spzeros(0)
   P, MP = Vector{Vector{Int64}}(maxups), Vector{SparseVector{Float64,Int64}}(maxups)
-  cB = Vector{Float64}(m)
   lnz = Ref{Int64}(); unz = Ref{Int64}(); nz_diag = Ref{Int64}()
   n_row = Ref{Int64}(); n_col = Ref{Int64}()
   Lp = Vector{Int64}(m + 1); Up = Vector{Int64}(m + 1)
   pcol = Vector{Int64}(m); tempperm = Vector{Int64}(m)
-  if L == 0
-    Rs = Vector{Float64}(m)
-    prow = Vector{Int64}(m)
-  end
 
   if 𝔹 == 0 # construct artificial problem
     artificial = true
-    signb = sign.(b)
     Ao = A
-    U = spdiagm(signb); A = [A U]
+    U = spdiagm(sign.(b)); A = [A U]
     Utri = UpperTriangular(U)
+    Ut = transpose(U); Uttri = LowerTriangular(Ut)
     𝔹 = collect(n+1:n+m); ℕ = collect(1:n) # artificial indexes
-    ca = [zeros(n); ones(m)]; getcX!(cB,ca,𝔹)
-    cN = Vector{Float64}(n); getcX!(cN,ca,ℕ)
-    xD = Vector{Float64}(n)
-    myprod!(xD,signb,A,ℕ)
-    r = -xD # artificial relative costs
+    ca = [zeros(n); ones(m)];
+    cN = zeros(n); cB = sign.(b)
     xB = abs.(b) # solution in current basis
   else
     artificial = false
     ℕ = setdiff(1:n, 𝔹)
-    xD = Vector{Float64}(n-m)
-    cN = Vector{Float64}(n-m); getcX!(cN,c,ℕ); getcX!(cB,c,𝔹)
+    cN = zeros(n-m); cB = c[𝔹]
     if L == 0
       F = lufact(A[:,𝔹]) # (Rs.*A)[prow,pcol] * x[pcol] = b[prow]
       xB = F\b
       L, U, prow, pcol, Rs = F[:(:)]
-      Utri = UpperTriangular(U); Ltri = LowerTriangular(L)
       savepermute!(tempperm, pcol, 𝔹)
       permute!!(xB, pcol) # pcol is lost
-      At_ldiv_B!(Utri,cB); At_ldiv_B!(Ltri,cB)
-      savepermute!(tempperm, prow, cB, inv = true)
-      cB .= cB.*Rs
-      myprod!(xD,cB,A,ℕ)
-      r = (-).(cN, xD)
-    else
-      Utri = UpperTriangular(U); Ltri = LowerTriangular(L)
-      At_ldiv_B!(Utri,cB); At_ldiv_B!(Ltri,cB)
-      savepermute!(tempperm, prow, cB, inv = true)
-      cB .= cB.*Rs
-      myprod!(xD,cB,A,ℕ)
-      r = (-).(cN, xD)
     end
+    Utri = UpperTriangular(U); Ltri = LowerTriangular(L)
+    Ut = transpose(U); Lt = transpose(L);
+    Uttri = LowerTriangular(Ut); Lttri = UpperTriangular(Lt)
+    Lt = transpose(L); Lttri = UpperTriangular(Lt)
+    A_ldiv_B!(Uttri,cB); A_ldiv_B!(Lttri,cB)
+    savepermute!(tempperm, prow, cB, true)
+    cB .= cB.*Rs
   end
-  q = findfirst(r .< -1e-12) # Bland's Rule
+  r = zeros(cN)
+  myprod!(r,cB,A,ℕ)
+  r .= -(-).(r, cN)
+  q = getq(r) # Bland's Rule
   status = :Optimal
 
   # simplex search
   apfrac = Array{Float64,1}(m)
   w = Array{Float64,1}(m); d = Array{Float64,1}(m)
   λ = Array{Float64,1}(m); Ucolp = Array{Float64,1}(m)
+  
   while !(q == 0 || iter >= max_iter)
     # finding viable columns to enter basis
     iter += 1
-    if L == 0
-      getAcol!(w,A,ℕ[q])
-    else
-      getAcol!(w,A,ℕ[q])
+    getAcol!(w,A,ℕ[q])
+    if L != 0
       w .= w.*Rs
       savepermute!(tempperm, prow, w)
       A_ldiv_B!(Ltri,w)
@@ -174,9 +168,11 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
              Ptr{Void}),Lp,Lj,Lx,Up,Ui,Ux,prow,pcol,C_NULL,0, Rs, F.numeric)
       if L == 0
         L = transpose(SparseMatrixCSC(m, m, increment!(Lp), increment!(Lj), Lx))
-        Ltri = LowerTriangular(L)
+        Ltri = LowerTriangular(L);
+        Lt = transpose(L); Lttri = UpperTriangular(Lt)
       else
         copy!(L, transpose(SparseMatrixCSC(m, m, increment!(Lp), increment!(Lj), Lx)))
+        copy!(Lt,L); transpose!(Lt,L)
       end
       copy!(U, SparseMatrixCSC(m, m, increment!(Up), increment!(Ui), Ux))
       increment!(prow); increment!(pcol)
@@ -193,23 +189,21 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
           P[ups] = 1:m; reverse!(reverse!(P[ups],p,m),p,m-1)
         end
         maxed? MP[ups] .= spzeros(m) : MP[ups] = spzeros(m)
-        if nnz(Ufiller) < nnz(U)
-          nnz(Ufiller) == 0 ? Ufiller = similar(U) : copy!(Ufiller, U)
+        if length(Ut.rowval) < nnz(U)
+          copy!(Ut, U)
         end
-        halfperm!(Ufiller, U, P[ups])
-        getAcol!(Ucolp,Ufiller,p)
+        halfperm!(Ut, U, P[ups])
+        getAcol!(Ucolp,Ut,p)
         for i in p:m-1
           if Ucolp[i] != 0
-            (MP[ups])[i] = Ucolp[i]/Ufiller[i,i+1]
-            for j in nzrange(Ufiller,i+1)
-              Ucolp[Ufiller.rowval[j]] -= (MP[ups])[i]*Ufiller.nzval[j]
+            (MP[ups])[i] = Ucolp[i]/Ut[i,i+1]
+            for j in nzrange(Ut,i+1)
+              Ucolp[Ut.rowval[j]] -= (MP[ups])[i]*Ut.nzval[j]
             end
           end
         end
-        Ufiller.nzval[nzrange(Ufiller,p)] = 0
-        Ufiller[end,p] = Ucolp[end]
-        dropzeros!(Ufiller)
-        halfperm!(U, Ufiller, P[ups])
+        Ut[end,p] = Ucolp[end]
+        halfperm!(U, Ut, P[ups])
         savepermute!(tempperm, P[ups], 𝔹)
         savepermute!(tempperm, P[ups], xB)
       end
@@ -217,24 +211,29 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
 
     # check optimality and choose variable to leave basis if necessary
     artificial? getcX!(λ,ca,𝔹) : getcX!(λ,c,𝔹)
-    At_ldiv_B!(Utri,λ)
+    Uend = length(U.rowval)
+    if length(Ut.rowval) < nnz(U)
+      copy!(Ut,U)
+    end
+    transpose!(Ut,U)
+    A_ldiv_B!(Uttri,λ)
     for j in 1:ups
       subdot!(λ,MP[ups-j+1],λ[end],m)
-      savepermute!(tempperm, P[ups-j+1], λ, inv = true)
+      savepermute!(tempperm, P[ups-j+1], λ, true)
     end
     if L == 0
-      myprod!(xD,λ,A,ℕ)
+      myprod!(r,λ,A,ℕ)
       artificial? getcX!(cN,ca,ℕ) : getcX!(cN,c,ℕ)
-      r .= (-).(cN, xD)
+      r .= (-).(cN, r)
     else
-      At_ldiv_B!(Ltri,λ)
-      savepermute!(tempperm, prow, λ, inv = true)
+      A_ldiv_B!(Lttri,λ)
+      savepermute!(tempperm, prow, λ, true)
       λ .= λ.*Rs
-      myprod!(xD,λ,A,ℕ)
+      myprod!(r,λ,A,ℕ)
       artificial? getcX!(cN,ca,ℕ) : getcX!(cN,c,ℕ)
-      r .= (-).(cN, xD)
+      r .= (-).(cN, r)
     end
-    q = findfirst(r .< -1e-12) # Bland's Rule
+    q = getq(r) # Bland's rule
   end
   if iter >= max_iter
     status = :UserLimit
@@ -260,21 +259,15 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
       Ap = Array{Float64, 1}(m)
       while p != 0
         q = 1
-        if L ==0
-          getAcol!(Ap,A,𝔹[p],Irows)
-        else
-          getAcol!(Ap,A,𝔹[p],Irows)
-          savepermute!(tempperm, prow, Ap)
-        end
+        getAcol!(Ap,A,𝔹[p],Irows)
+        if L !=0 savepermute!(tempperm, prow, Ap) end
         for j in 1:ups
           savepermute!(tempperm, P[j], Ap)
         end
         PivotAp = findfirst(Ap)
         while q <= length(ℕ) # searching for columns to substitute artificials ℕ basis
-          if L == 0
-            getAcol!(d,A,ℕ[q],Irows)
-          else
-            getAcol!(d,A,ℕ[q],Irows)
+          getAcol!(d,A,ℕ[q],Irows)
+          if L != 0
             d .= d.*Rs
             savepermute!(tempperm, prow, d)
             A_ldiv_B!(Ltri,d)
@@ -308,4 +301,3 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64},
   end
   return x, z, status
 end
-
