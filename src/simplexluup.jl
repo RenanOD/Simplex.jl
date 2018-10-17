@@ -50,9 +50,9 @@ function subdot!(l::Vector{Float64},a::SparseVector{Float64,Int64},z::Float64)
   end
 end
 function subdot!(l::Vector{Float64},a::Vector{Float64},z::Float64)
-  for i in 1:length(a)
-    if a[i] != 0
-      l[i] -= z*a[i]
+  for (i,j) in enumerate(a)
+    if j != 0
+      l[i] -= z*j
     end
   end
 end
@@ -72,6 +72,16 @@ function getq(r::Vector{Float64}) # Bland's Rule
   end
   return 0
 end
+
+function insertAcol!(A::SparseMatrixCSC{Float64,Int64},a::Vector{Float64},p::Int64)
+  for i in nzrange(A,p)
+    A.nzval[i] = 0.
+  end
+  for i in find(a)
+    A[i,p] = a[i]
+  end
+end
+
 
 function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::Vector{Float64},
                      𝔹=0, L=0, U::SparseMatrixCSC{Float64,Int64} = spdiagm(sign.(b)),
@@ -126,31 +136,32 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
   w = Array{Float64,1}(m); d = Vector{Float64}(m)
   λ = Array{Float64,1}(m); Ucolp = Array{Float64,1}(m)
   
-  while !(q == 0 || iter >= max_iter)
-    # finding viable columns to enter basis
-    iter += 1
-    getAcol!(w,A,ℕ[q])
-    if L != 0
-      w .= w.*Rs
-      savepermute!(tempperm, prow, w)
-      A_ldiv_B!(Ltri,w)
-    end
-    for j in 1:ups
-      savepermute!(tempperm, P[j], w)
-      w[end] -= dot(MP[j], w)
-    end
-    d .= w
-    A_ldiv_B!(Utri,d)
-    apfrac .= xB ./ d # relative variable changes to direction
-    xq = Inf
-    for i in 1:m # find min(apfrac[d .> 0])
-      if d[i] > 1e-12
-        if apfrac[i] < xq
-          xq = apfrac[i]
-          p = i
+  while !(q == 0 || iter > max_iter)
+
+      iter += 1
+      getAcol!(w,A,ℕ[q])
+      if L != 0
+        w .= w.*Rs
+        savepermute!(tempperm, prow, w)
+        A_ldiv_B!(Ltri,w)
+      end
+      for k in 1:ups
+        savepermute!(tempperm, P[k], w)
+        w[end] -= dot(MP[k], w)
+      end
+      d .= w
+      A_ldiv_B!(Utri,d)
+      apfrac .= xB ./ d # relative variable changes to direction
+      xq = Inf
+      for k in 1:m # find min(apfrac[d .> 0])
+        if d[k] > 1e-12
+          if apfrac[k] < xq
+            xq = apfrac[k]
+            p = k
+          end
         end
       end
-    end
+
     if xq == Inf
       status = :Unbounded; break
     end
@@ -172,12 +183,12 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
              Ptr{Int64},Ptr{Int64},Ptr{Void},Ref{Int64},Ptr{Float64},
              Ptr{Void}),Lp,Lj,Lx,Up,Ui,Ux,prow,pcol,C_NULL,0, Rs, F.numeric)
       if L == 0
-        L = transpose(SparseMatrixCSC(m, m, increment!(Lp), increment!(Lj), Lx))
-        Ltri = LowerTriangular(L)
-        Lt = transpose(L); Lttri = UpperTriangular(Lt)
+        Lt = SparseMatrixCSC(m, m, increment!(Lp), increment!(Lj), Lx)
+        L = transpose(Lt)
+        Ltri = LowerTriangular(L); Lttri = UpperTriangular(Lt)
       else
-        copy!(L, transpose(SparseMatrixCSC(m, m, increment!(Lp), increment!(Lj), Lx)))
-        copy!(Lt,L); transpose!(Lt,L)
+        copy!(Lt, SparseMatrixCSC(m, m, increment!(Lp), increment!(Lj), Lx))
+        copy!(L,Lt); transpose!(L,Lt)
       end
       copy!(U, SparseMatrixCSC(m, m, increment!(Up), increment!(Ui), Ux))
       increment!(prow); increment!(pcol)
@@ -185,7 +196,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
       permute!!(xB, pcol) # pcol is lost
       ups = 0
     else # update LU
-      U[:,p] .= w
+      insertAcol!(U,w,p)
       if findlast(w) > p
         ups += 1
         if maxed
@@ -200,7 +211,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
         halfperm!(Ut, U, P[ups])
         getAcol!(Ucolp,Ut,p)
         for i in p:m-1
-          if Ucolp[i] != 0
+          if Ucolp[i] != 0.
             (MP[ups])[i] = Ucolp[i]/Ut[i,i+1]
             for j in nzrange(Ut,i+1)
               Ucolp[Ut.rowval[j]] -= (MP[ups])[i]*Ut.nzval[j]
@@ -251,6 +262,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
     z = dot(c, x)
   else
     Irows = collect(1:m)
+    ℕ = setdiff(ℕ,n+1:n+m)
     artificial? getcX!(λ,ca,𝔹) : getcX!(λ,c,𝔹)
     if dot(xB, λ)/norm(xB) > 1e-12
       status = (iter >= max_iter) ? :UserLimit : :Infeasible
@@ -259,12 +271,11 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
       z = dot(c, x)
     elseif maximum(𝔹) > n # check for artificial variables in basis
       # remove artificial variables from basis
-      deleteat!(ℕ, find(ℕ .> n))
-      p = findfirst(𝔹 .> n)
+      p, pind = findmax(𝔹)
       Ap = Array{Float64, 1}(m)
-      while p != 0
+      while p > n
         q = 1
-        getAcol!(Ap,A,𝔹[p],Irows)
+        getAcol!(Ap,A,p,Irows)
         if L !=0 savepermute!(tempperm, prow, Ap) end
         for j in 1:ups
           savepermute!(tempperm, P[j], Ap)
@@ -285,11 +296,11 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
           (abs(d[PivotAp]) > 1e-12) ? break : q += 1
         end
         if q > length(ℕ)
-          deleteat!(Irows, findfirst(A[Irows,𝔹[p]]))
-          deleteat!(𝔹, p); deleteat!(xB, p)
-          deleteat!(Ap, p); deleteat!(d, p)
+          deleteat!(Irows, findfirst(A[Irows,p]))
+          deleteat!(𝔹, pind); deleteat!(xB, pind)
+          deleteat!(Ap, pind); deleteat!(d, pind)
         else
-          𝔹[p] = ℕ[q]
+          𝔹[pind] = ℕ[q]
         end
         F = lufact(A[Irows,𝔹])
         L, U, prow, pcol, Rs = F[:(:)]
@@ -297,7 +308,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
         ups = 0
         savepermute!(tempperm, pcol, 𝔹)
         permute!!(xB, pcol) # pcol is lost
-        p = findfirst(𝔹 .> n)
+        p, pind = findmax(𝔹)
       end
       return simplexluup(c, A[Irows,1:n], b[Irows], 𝔹, L, U, prow, Rs, xB)
     else
