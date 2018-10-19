@@ -4,17 +4,17 @@
 #     x >= 0,
 #in the order [c; zeros], [A C], b, status.
 #
-#The Clp solver is used to convert the MPS file to a problem with form 
+#The GLPK solver is used to convert the MPS file to a problem with form 
 #min c'x
 #s.a. l <= Ax <= u
 #     xl <= x <= xu,
 #which is then explicitly standardized.
 
-using Clp, JuMP, MathProgBase
+using GLPKMathProgInterface, JuMP, MathProgBase
 
 function mpstostd(mpsfile)
-    mod = Model(solver=ClpSolver())
-	internal_model = MathProgBase.LinearQuadraticModel(ClpSolver())
+    mod = Model(solver=GLPKSolverLP())
+	internal_model = MathProgBase.LinearQuadraticModel(GLPKSolverLP())
     MathProgBase.loadproblem!(internal_model, mpsfile)
 
 	c = MathProgBase.getobj(internal_model)

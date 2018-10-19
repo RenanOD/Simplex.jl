@@ -68,7 +68,7 @@ function test_transpluup()
         m, n = scale_m * rand(2:5), scale_n * rand(2:5)
         A, b, c = transport_instance(m, n)
 
-        model = Model(solver = CbcSolver())
+        model = Model(solver = GLPKSolverLP())
         @variable(model, x[1:m*n] >= 0)
         @objective(model, Min, dot(x, c))
         @constraint(model, A * x .== b)

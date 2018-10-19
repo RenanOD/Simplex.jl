@@ -69,7 +69,7 @@ function test_transpinv()
         A, b, c = transport_instance(m, n)
         A = full(A)
 
-        model = Model(solver = CbcSolver())
+        model = Model(solver = GLPKSolverLP())
         @variable(model, x[1:m*n] >= 0)
         @objective(model, Min, dot(x, c))
         @constraint(model, A * x .== b)

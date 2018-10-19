@@ -9,8 +9,8 @@ function test_simplex_mps()
 	    c, A, b, status, zchange = mpstostd(mpsfile)
 	    m, n = size(A)
 
-	    mod = Model(solver=ClpSolver())
-	    internal_model = MathProgBase.LinearQuadraticModel(ClpSolver())
+	    mod = Model(solver=GLPKSolverLP())
+	    internal_model = MathProgBase.LinearQuadraticModel(GLPKSolverLP())
         MathProgBase.loadproblem!(internal_model, mpsfile)
         status = solvelp(internal_model).status
         zorig = solvelp(internal_model).objval
