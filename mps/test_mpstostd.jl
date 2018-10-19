@@ -4,7 +4,7 @@ function test_mpstostd()
 
 	problems = ["basic.mps", "farm.mps","kleemin3.mps","kleemin4.mps","kleemin5.mps","kleemin6.mps","kleemin7.mps","kleemin8.mps","afiro.mps","refine.mps","sc50a.mps","sc50b.mps", "share2b.mps","scagr7.mps","p0282.mps","p0548.mps","p0291.mps","agg2.mps","agg3.mps","nsic1.mps"]
 	cd("mps")
-	
+
 	@testset "Many tests" begin
 	  for i in 1:length(problems)
 	    mpsfile = problems[i]

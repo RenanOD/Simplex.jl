@@ -51,17 +51,17 @@ function savepermute!(tempperm, perm, l, inv::Bool = false)
 end
 
 # Bland's Rule: determine elements of r = c[N] - (l'*A[:,N])' one by one,
-# q will be the first s.t. r[q] < -1e-12
-function getq(c::Vector{Float64}, l::Vector{Float64},
-              A::SparseMatrixCSC{Float64,Int64}, N::Vector{Int64})
+# q will be the first s.t. r[q] < -ϵ
+function getq(c::Vector{Float64}, λ::Vector{Float64},
+              A::SparseMatrixCSC{Float64,Int64}, N::Vector{Int64}, ϵ)
   for (colN,colA) in enumerate(N)
     rq = c[colA]
     for i in nzrange(A,colA)
-      if l[A.rowval[i]] != 0
-        rq -= l[A.rowval[i]]*A.nzval[i]
+      if λ[A.rowval[i]] != 0
+        rq -= λ[A.rowval[i]]*A.nzval[i]
       end
     end
-    if rq < -1e-12
+    if rq < -ϵ
       return colN
     end
   end
@@ -82,8 +82,9 @@ end
 function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::Vector{Float64},
                      𝔹=0, L=0, U::SparseMatrixCSC{Float64,Int64} = spdiagm(sign.(b)),
                      prow=Vector{Int64}(A.m), Rs=Vector{Float64}(A.m),
-                     xB::Vector{Float64}=Float64[]; max_iter::Int64 = 10000, maxups::Int64 = 10)
+                     xB::Vector{Float64}=Float64[]; max_iter::Int64 = 20000, maxups::Int64 = 10)
 
+  ϵ = norm(c)*1e-9
   m, n = A.m, A.n # preparations
   iter = 0; ups = 0; maxed = false
   P, MP = Vector{Vector{Int64}}(maxups), Vector{SparseVector{Float64,Int64}}(maxups)
@@ -92,7 +93,6 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
   Lp = Vector{Int64}(m + 1); Up = Vector{Int64}(m + 1)
   pcol = Vector{Int64}(m); tempperm = Vector{Int64}(m)
 
-  apfrac = Array{Float64,1}(m)
   w = Array{Float64,1}(m); d = Vector{Float64}(m)
   λ = Array{Float64,1}(m); Ucolp = Array{Float64,1}(m)
 
@@ -125,7 +125,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
     savepermute!(tempperm, prow, λ, true)
     λ .= λ.*Rs
   end
-  artificial? q = getq(ca,λ,A,ℕ) : q = getq(c,λ,A,ℕ)
+  artificial? q = getq(ca,λ,A,ℕ,ϵ) : q = getq(c,λ,A,ℕ,ϵ)
   status = :Optimal
 
   # simplex search
@@ -144,12 +144,12 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
       end
       d .= w
       A_ldiv_B!(Utri,d)
-      apfrac .= xB ./ d # relative variable changes to direction
       xq = Inf
-      for k in 1:m # find min(apfrac[d .> 0])
-        if d[k] > 1e-12
-          if apfrac[k] < xq
-            xq = apfrac[k]
+      for k in 1:m # find min xB/d s.t. d .> 0
+        if d[k] >= ϵ
+          dfrac = xB[k]/d[k]
+          if dfrac < xq
+            xq = dfrac
             p = k
           end
         end
@@ -159,9 +159,9 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
       status = :Unbounded; break
     end
 
-    subdot!(xB,d,xq) # column change
-    xB[p] = xq # update solution
-    𝔹[p], ℕ[q] = ℕ[q], 𝔹[p] # update indexes
+    subdot!(xB,d,xq) # update solution
+    xB[p] = xq
+    𝔹[p], ℕ[q] = ℕ[q], 𝔹[p] # column change: update indexes
 
     if ups >= maxups # reset LU
       maxed = true
@@ -235,7 +235,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
       savepermute!(tempperm, prow, λ, true)
       λ .= λ.*Rs
     end
-    artificial? q = getq(ca,λ,A,ℕ) : q = getq(c,λ,A,ℕ)
+    artificial? q = getq(ca,λ,A,ℕ,ϵ) : q = getq(c,λ,A,ℕ,ϵ)
   end
 
   if iter >= max_iter
@@ -250,7 +250,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
     Irows = collect(1:m)
     ℕ = setdiff(ℕ,n+1:n+m)
     artificial? getλ!(λ,ca,𝔹) : getλ!(λ,c,𝔹)
-    if dot(xB, λ)/norm(xB) > 1e-12
+    if dot(xB, λ)/norm(xB) > 1e-9
       status = (iter >= max_iter) ? :UserLimit : :Infeasible
       I = find(𝔹 .<= n - m)
       x[𝔹[I]] = xB[I]
@@ -262,7 +262,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
       while p > n
         q = 1
         getAcol!(Ap,A,p,Irows)
-        if L !=0 savepermute!(tempperm, prow, Ap) end
+        if L != 0 savepermute!(tempperm, prow, Ap) end
         for j in 1:ups
           savepermute!(tempperm, P[j], Ap)
         end
@@ -279,7 +279,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
             d[end] -= dot(MP[j], d)
           end
           A_ldiv_B!(Utri,d)
-          (abs(d[PivotAp]) > 1e-12) ? break : q += 1
+          (abs(d[PivotAp]) >= ϵ) ? break : q += 1
         end
         if q > length(ℕ)
           deleteat!(Irows, findfirst(A[Irows,p]))
@@ -287,6 +287,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
           deleteat!(Ap, pind); deleteat!(d, pind)
         else
           𝔹[pind] = ℕ[q]
+          deleteat!(ℕ, q)
         end
         F = lufact(A[Irows,𝔹])
         L, U, prow, pcol, Rs = F[:(:)]
