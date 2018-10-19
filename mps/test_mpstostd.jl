@@ -11,13 +11,13 @@ function test_mpstostd()
 	    c, A, b, status, zchange = mpstostd(mpsfile)
 	    m, n = size(A)
 
-	    mod = Model(solver=ClpSolver())
-	    internal_model = MathProgBase.LinearQuadraticModel(ClpSolver())
+	    mod = Model(solver=GLPKSolver())
+	    internal_model = MathProgBase.LinearQuadraticModel(GLPKSolver())
         MathProgBase.loadproblem!(internal_model, mpsfile)
         status = solvelp(internal_model).status
         zorig = solvelp(internal_model).objval
 
-        mo = Model(solver=ClpSolver())
+        mo = Model(solver=GLPKSolver())
         @variable(mo, x[1:length(c)] >= 0)
         @objective(mo, Min, dot(c,x))
         @constraint(mo, full(A)*x .== b)
