@@ -1,5 +1,5 @@
 Pkg.add("JuMP")
-Pkg.add("GLPK")
+Pkg.add("GLPKMathProgInterface")
 
 using Simplex, Base.Test, JuMP, GLPKMathProgInterface
 
