@@ -108,7 +108,7 @@ end
 
 
 function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::Vector{Float64},
-                     𝔹=0, L=0, U::SparseMatrixCSC{Float64,Int64} = spdiagm(sign.(b)),
+                     𝔹=0, L=0, U = 0,
                      prow=Vector{Int64}(A.m), Rs=Vector{Float64}(A.m),
                      xB::Vector{Float64}=Float64[]; max_iter::Int64 = 20000, maxups::Int64 = 10)
 
@@ -120,6 +120,13 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
   n_row = Ref{Int64}(); n_col = Ref{Int64}()
   Lp = Vector{Int64}(m + 1); Up = Vector{Int64}(m + 1)
   pcol = Vector{Int64}(m); tempperm = Vector{Int64}(m)
+  signb = sign.(b)
+  for (i,j) in enumerate(signb)
+      if j == 0
+        signb[i] = 1
+      end
+  end
+  U = spdiagm(signb)
 
   w = Array{Float64,1}(m); d = Vector{Float64}(m)
   λ = Array{Float64,1}(m); Ucolp = Array{Float64,1}(m)
@@ -132,7 +139,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
     Ut = transpose(U); Uttri = LowerTriangular(Ut)
     𝔹 = collect(n+1:n+m); ℕ = collect(1:n) # artificial indexes
     ca = [zeros(n); ones(m)];
-    λ .= sign.(b)
+    λ .= signb
     xB = abs.(b) # solution in current basis
   else
     artificial = false
