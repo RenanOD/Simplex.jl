@@ -112,7 +112,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
                      prow=Vector{Int64}(A.m), Rs=Vector{Float64}(A.m),
                      xB::Vector{Float64}=Float64[]; max_iter::Int64 = 20000, maxups::Int64 = 10)
 
-  ϵ = norm(c)*1e-9
+  ϵ = norm(c)*1e-13
   m, n = A.m, A.n # preparations
   iter = 0; ups = 0; maxed = false
   P, MP = Vector{Vector{Int64}}(maxups), Vector{SparseVector{Float64,Int64}}(maxups)
@@ -122,11 +122,9 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
   pcol = Vector{Int64}(m); tempperm = Vector{Int64}(m)
   signb = sign.(b)
   for (i,j) in enumerate(signb)
-      if j == 0
-        signb[i] = 1
-      end
+    (j >= 0) ? signb[i] = 1 : signb[i] = -1
   end
-  U = spdiagm(signb)
+  if (U == 0) U = spdiagm(signb) end
 
   w = Array{Float64,1}(m); d = Vector{Float64}(m)
   λ = Array{Float64,1}(m); Ucolp = Array{Float64,1}(m)
@@ -286,7 +284,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
     Irows = collect(1:m)
     ℕ = setdiff(ℕ,n+1:n+m)
     artificial? getλ!(λ,ca,𝔹) : getλ!(λ,c,𝔹)
-    if dot(xB, λ)/norm(xB) > 1e-9
+    if dot(xB, λ)/norm(xB) > 1e-6
       status = (iter >= max_iter) ? :UserLimit : :Infeasible
       I = find(𝔹 .<= n - m)
       x[𝔹[I]] = xB[I]
