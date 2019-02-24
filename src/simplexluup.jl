@@ -2,7 +2,7 @@ export simplexluup
 
 function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::Vector{Float64},
                      𝔹=0, L=0, U = 0,
-                     prow=Vector{Int64}(undef, A.m), Rs=Vector{Float64}(undef, A.m),
+                     prow=collect(1:A.m), Rs=Vector{Float64}(undef, A.m),
                      xB::Vector{Float64}=Float64[]; max_iter::Int64 = 20000, maxups::Int64 = 10)
 
   ϵ = norm(c)*1e-13
@@ -12,7 +12,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
   lnz = Ref{Int64}(); unz = Ref{Int64}(); nz_diag = Ref{Int64}()
   n_row = Ref{Int64}(); n_col = Ref{Int64}()
   Lp = Vector{Int64}(undef, m + 1); Up = Vector{Int64}(undef, m + 1)
-  pcol = Vector{Int64}(undef, m); tempperm = Vector{Int64}(undef, m)
+  pcol = collect(1:m); tempperm = Vector{Int64}(undef, m)
   signb = sign.(b)
   for (i,j) in enumerate(signb)
     (j >= 0) ? signb[i] = 1 : signb[i] = -1
@@ -115,7 +115,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
       Up .+= 1; Ui .+= 1
       copyto!(U, SparseMatrixCSC(m, m, Up, Ui, Ux))
       prow .+= 1; pcol .+= 1
-      savepermute!(tempperm, pcol, 𝔹)
+      savepermute!(tempperm, pcol, 𝔹) # GOT TO THIS LINE BEFORE pcol WAS FILLED WITH MEANINGFUL VALUES
       permute!!(xB, pcol) # pcol is lost
       ups = 0
     else # update LU
