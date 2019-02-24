@@ -115,7 +115,7 @@ function simplexluup(c::Vector{Float64}, A::SparseMatrixCSC{Float64,Int64}, b::V
       Up .+= 1; Ui .+= 1
       copyto!(U, SparseMatrixCSC(m, m, Up, Ui, Ux))
       prow .+= 1; pcol .+= 1
-      savepermute!(tempperm, pcol, 𝔹) # GOT TO THIS LINE BEFORE pcol WAS FILLED WITH MEANINGFUL VALUES
+      savepermute!(tempperm, pcol, 𝔹)
       permute!!(xB, pcol) # pcol is lost
       ups = 0
     else # update LU
