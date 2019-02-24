@@ -3,6 +3,6 @@ module Simplex
   import SparseArrays.halfperm!, Base.permute!!
   include("simplexauxiliar.jl")
   include("simplexluup.jl")
-  #include("simplexinv.jl")
+  #include("simplexinv.jl") NEEDS UPDATE
 
 end
