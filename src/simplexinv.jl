@@ -69,7 +69,7 @@ function simplexinv(c, A, b, 𝔹=0, invB=0; max_iter = 20000)
     z = dot(c, x)
   else
     if dot(xB, c[𝔹]) > eps(Float64)
-      status = (iter >= max_iter) ? :UserLimit : :Infeas𝔹le
+      status = (iter >= max_iter) ? :UserLimit : :Infeasible
       I = findall(𝔹 .<= n - m)
       x[𝔹[I]] = xB[I]
       z = dot(c[𝔹], x)
