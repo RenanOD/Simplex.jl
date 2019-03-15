@@ -1,36 +1,39 @@
 export simplexinv
 
-function simplexinv(c, A, b, IB=0, invB=0; max_iter = 20000)
+function simplexinv(c, A, b, 𝔹=0, invB=0; max_iter = 20000)
   m, n = size(A)
   iter = 0
-  if IB == 0 # construct artificial problem
+  λ = Array{Float64,1}(undef, m); d = Array{Float64,1}(undef, m)
+  if 𝔹 == 0 # construct artificial problem
     artificial = true
     signb = sign.(b)
     A = [A sparse(Diagonal(signb))]
-    IB = collect(n+1:n+m) # indexes of basic variables
-    IN = collect(1:n)
-    co = collect(c)
+    𝔹 = collect(n+1:n+m) # indexes of basic variables
+    ℕ = collect(1:n)
+    co = copy(c)
     c = [zeros(n); ones(m)]
     invB = sparse(Diagonal(signb))
-    r = -A[:,IN]'*signb # artificial relative costs
-    xB = collect(abs.(b)) # solution in current basis
+    xB = abs.(b) # solution in current basis
   else
     artificial = false
-    IN = setdiff(1:n, IB)
-    r = c[IN] - A[:,IN]' * (invB' * c[IB])
+    if (invB == 0) invB = sparse(inv(Matrix(A[:,𝔹]))) end
+    ℕ = setdiff(1:n, 𝔹)
     xB = invB*b
   end
-  q = findfirst(r .< 0) # Bland's Rule
+  getλ!(λ,c,𝔹)
+  λ = invB'*λ # FIX
+  q = getq(c, λ, A, ℕ)
 
   status = :Optimal
 
   while !(q == nothing || iter >= max_iter) # relative variable changes to directioner >= max_iter)
     iter += 1
-    d = invB * A[:,IN[q]] # viable direction
+    getAcol!(d,A,ℕ[q])
+    d = invB * d # viable direction
 
     xq = Inf
     for k in 1:m # find min xB/d s.t. d .> 0
-      if d[k] >= 2e-16
+      if d[k] >= eps(Float64)
         dfrac = xB[k]/d[k]
         if dfrac < xq
           xq = dfrac
@@ -42,16 +45,18 @@ function simplexinv(c, A, b, IB=0, invB=0; max_iter = 20000)
       status = :Unbounded; break
     end
 
-    xB -= xq * d; xB[p] = xq # update solution
-    IB[p], IN[q] = IN[q], IB[p] # update indexes
+    subdot!(xB,d,xq) # update solution
+    xB[p] = xq
+    𝔹[p], ℕ[q] = ℕ[q], 𝔹[p] # update indexes
     #update of inverse of B
     E = one(zeros(m,m))
     dp = d[p]
     d[p] = -1
     E[:, p] = -d / dp
-    invB = E*invB #no need to create E
-    r = c[IN] - A[:,IN]' * (invB' * c[IB])
-    q = findfirst(r .< 0) # Bland's Rule
+    invB = E*invB # STOP THIS
+    getλ!(λ,c,𝔹)
+    λ = invB'*λ # FIX
+    q = getq(c, λ, A, ℕ)
   end
 
   if iter >= max_iter
@@ -60,41 +65,49 @@ function simplexinv(c, A, b, IB=0, invB=0; max_iter = 20000)
 
   x = zeros(n)
   if !artificial
-    x[IB] = xB
+    x[𝔹] = xB
     z = dot(c, x)
   else
-    if dot(xB, c[IB]) > 0
-      status = :Infeasible
-      I = findall(IB .<= n - m)
-      x[I] = xB[I]
-      z = dot(co, x)
-    elseif maximum(IB) > n # check for artificial variables in basis
-      deleteat!(IN, findall(IN .> n))
+    if dot(xB, c[𝔹]) > eps(Float64)
+      status = (iter >= max_iter) ? :UserLimit : :Infeas𝔹le
+      I = findall(𝔹 .<= n - m)
+      x[𝔹[I]] = xB[I]
+      z = dot(c[𝔹], x)
+    elseif maximum(𝔹) > n # check for artificial variables in basis
+      ℕ = setdiff(ℕ,n+1:n+m)
       Irows = collect(1:m)
-      p = findfirst(IB .> n)
-      while p != nothing
-        q = findfirst(invB[p,:]' * A[Irows,IN] .!= 0)
-        if q == nothing
-          deleteat!(Irows, p)
-          deleteat!(IB, p)
-          invB = inv(Matrix(A[Irows,IB]))
+      p, pind = findmax(𝔹)
+      Ap = Array{Float64, 1}(undef, m)
+      while p > n
+        q = 1
+        getAcol!(Ap,A,p,Irows)
+        PivotAp = findfirst(Ap .!= 0) #findfirst(Ap)
+        while q <= length(ℕ)
+          getAcol!(d,A,ℕ[q],Irows)
+          d = invB * d
+          (abs(d[PivotAp]) >= eps(Float64)) ? break : q += 1
+        end
+        if q > length(ℕ)
+          deleteat!(Irows, findfirst(A[Irows,p] .!= 0))
+          deleteat!(𝔹, pind); deleteat!(xB, pind)
+          deleteat!(Ap, pind); deleteat!(d, pind)
+          invB = sparse(inv(Matrix(A[Irows,𝔹])))
         else
-          IB[p] = IN[q]
-          deleteat!(IN, q)
-          d = invB * A[Irows,IN[q]]
+          𝔹[p] = ℕ[q]
+          deleteat!(ℕ, q)
+          d = invB * A[Irows,ℕ[q]]
           E = one(zeros(m,m))
           dp = d[p]
           d[p] = -1
           E[:, p] = -d / dp
-          invB = Q*invB
+          invB = E*invB # STOP THIS
         end
-        p = findfirst(IB .> n)
+        p, pind = findmax(𝔹)
       end
-      x, z, status = simplexinv(co, A[Irows,1:n], b[Irows], IB, invB)
+      x, z, status = simplexinv(co, A[Irows,1:n], b[Irows], 𝔹, invB)
     else
-      x, z, status = simplexinv(co, A[:,1:n], b, IB, invB)
+      x, z, status = simplexinv(co, A[:,1:n], b, 𝔹, invB)
     end
   end
-
   return x, z, status
 end
